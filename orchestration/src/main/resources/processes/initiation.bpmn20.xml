@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://d2os.com/bpmn"
+             id="d2os-initiation-definitions">
+
+  <!--
+    Initiation workflow (T027, E1.5). STRICTLY SEQUENTIAL — no parallel gateway in Phase 1.
+    Three persona steps run in order, then package assembly + delivery. Every step is async so it
+    executes via the persisted job executor (queue-and-resume, NFR-4). PersonaStepDelegate derives
+    which persona to run from the activity id (must match the "persona-N" catalog seed keys).
+  -->
+  <process id="initiation" name="Initiation Case" isExecutable="true">
+
+    <startEvent id="start"/>
+    <sequenceFlow id="f1" sourceRef="start" targetRef="persona-1"/>
+
+    <serviceTask id="persona-1" name="Persona 1"
+                 flowable:async="true"
+                 flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="f2" sourceRef="persona-1" targetRef="persona-2"/>
+
+    <serviceTask id="persona-2" name="Persona 2"
+                 flowable:async="true"
+                 flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="f3" sourceRef="persona-2" targetRef="persona-3"/>
+
+    <serviceTask id="persona-3" name="Persona 3"
+                 flowable:async="true"
+                 flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="f4" sourceRef="persona-3" targetRef="assemble-package"/>
+
+    <serviceTask id="assemble-package" name="Assemble Package"
+                 flowable:async="true"
+                 flowable:delegateExpression="${assemblePackageDelegate}"/>
+    <sequenceFlow id="f5" sourceRef="assemble-package" targetRef="end"/>
+
+    <endEvent id="end"/>
+  </process>
+</definitions>

@@ -1,0 +1,6 @@
+dependencies {
+    implementation project(':tenancy')
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.flowable:flowable-spring-boot-starter-dmn'
+}

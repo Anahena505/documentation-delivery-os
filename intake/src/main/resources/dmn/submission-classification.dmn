@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             id="d2os-submission-classification"
+             name="D2OS Submission Classification"
+             namespace="http://d2os.com/dmn">
+  <decision id="submissionClassification" name="Submission Classification">
+    <decisionTable id="dt-submission-classification" hitPolicy="FIRST">
+      <input id="in-requestType" label="Request Type">
+        <inputExpression id="ie-requestType" typeRef="string">
+          <text>requestType</text>
+        </inputExpression>
+      </input>
+      <output id="out-caseType" label="Case Type" name="caseType" typeRef="string"/>
+      <output id="out-confidence" label="Confidence" name="confidence" typeRef="number"/>
+      <!-- Phase 1 has a single case type; explicit match is high-confidence, anything else is
+           low-confidence and forces a human confirm step (FR-002). -->
+      <rule id="r-initiation">
+        <inputEntry id="ie-r1"><text>"initiation"</text></inputEntry>
+        <outputEntry id="oe-r1-ct"><text>"initiation"</text></outputEntry>
+        <outputEntry id="oe-r1-cf"><text>0.95</text></outputEntry>
+      </rule>
+      <rule id="r-default">
+        <inputEntry id="ie-r2"><text></text></inputEntry>
+        <outputEntry id="oe-r2-ct"><text>"initiation"</text></outputEntry>
+        <outputEntry id="oe-r2-cf"><text>0.60</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>

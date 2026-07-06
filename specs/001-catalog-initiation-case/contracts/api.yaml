@@ -1,0 +1,432 @@
+openapi: 3.1.0
+info:
+  title: D2OS Phase 1 — Catalog Spine + Initiation Case API
+  version: 0.1.0
+  description: >
+    External contract for the Phase 1 thin slice: submission intake, case lifecycle,
+    package delivery, replay audit, and KPI metrics. All requests are workspace-scoped;
+    the authenticated principal's workspace binds every query (RLS beneath). No endpoint
+    accepts or returns cross-workspace data.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: intake
+  - name: cases
+  - name: packages
+  - name: replay
+  - name: metrics
+  - name: catalog
+
+paths:
+  /submissions:
+    post:
+      tags: [intake]
+      summary: Submit a structured Problem Form (FR-001)
+      operationId: createSubmission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProblemSubmissionCreate' }
+      responses:
+        '201':
+          description: Submission accepted and classified (pending human confirm if low confidence)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemSubmission' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /submissions/{submissionId}/confirm-classification:
+    post:
+      tags: [intake]
+      summary: Human confirmation of DMN classification (FR-002)
+      operationId: confirmClassification
+      parameters: [{ $ref: '#/components/parameters/submissionId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmedCaseType]
+              properties:
+                confirmedCaseType: { type: string, example: initiation }
+                rationale: { type: string }
+      responses:
+        '200':
+          description: Classification confirmed; recorded as a Decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemSubmission' }
+
+  /cases:
+    post:
+      tags: [cases]
+      summary: Open a Case from a confirmed submission (FR-003, FR-016)
+      operationId: createCase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [submissionId, featureId]
+              properties:
+                submissionId: { type: string, format: uuid }
+                featureId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Case created; definition snapshot pinned at Planned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseInstance' }
+        '409':
+          description: Optimistic-concurrency conflict — an active mutating Case already exists on this Feature (FR-016)
+
+  /cases/{caseId}:
+    get:
+      tags: [cases]
+      summary: Case status, state history, and progress
+      operationId: getCase
+      parameters: [{ $ref: '#/components/parameters/caseId' }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseInstance' }
+        '404': { description: Not found (or other workspace — indistinguishable by design) }
+
+  /cases/{caseId}/start:
+    post:
+      tags: [cases]
+      summary: Start the Initiation pipeline (Planned → Running) (FR-004)
+      operationId: startCase
+      parameters: [{ $ref: '#/components/parameters/caseId' }]
+      responses:
+        '202': { description: Pipeline started; personas execute sequentially }
+        '409': { description: Case not in Planned state }
+
+  /cases/{caseId}/escalations:
+    get:
+      tags: [cases]
+      summary: Open escalations (validation failed after 3 generations) (FR-005)
+      operationId: listEscalations
+      parameters: [{ $ref: '#/components/parameters/caseId' }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Escalation' }
+
+  /cases/{caseId}/escalations/{escalationId}/resolve:
+    post:
+      tags: [cases]
+      summary: Human resolves an escalation (gate-comment-and-regenerate or cancel)
+      operationId: resolveEscalation
+      parameters:
+        - { $ref: '#/components/parameters/caseId' }
+        - name: escalationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution]
+              properties:
+                resolution: { type: string, enum: [regenerate_with_comment, cancel_case] }
+                gateComment: { type: string, description: Required when resolution=regenerate_with_comment }
+      responses:
+        '200': { description: Resolution recorded as a Decision; case resumes or cancels }
+
+  /cases/{caseId}/audit:
+    get:
+      tags: [cases]
+      summary: Tamper-evident audit trail for a case (FR-007)
+      operationId: getCaseAudit
+      parameters: [{ $ref: '#/components/parameters/caseId' }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEntry' }
+
+  /cases/{caseId}/package:
+    get:
+      tags: [packages]
+      summary: Delivered Execution Package with manifest, hashes, and Handover Record (FR-008)
+      operationId: getPackage
+      parameters: [{ $ref: '#/components/parameters/caseId' }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExecutionPackage' }
+        '409': { description: Case not yet Delivered }
+
+  /cases/{caseId}/package/verify:
+    post:
+      tags: [packages]
+      summary: Re-verify package integrity stamp (SC-005)
+      operationId: verifyPackage
+      parameters: [{ $ref: '#/components/parameters/caseId' }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  manifestHashValid: { type: boolean }
+                  artifactHashResults:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        artifactRevisionId: { type: string, format: uuid }
+                        valid: { type: boolean }
+
+  /cases/{caseId}/replay:
+    post:
+      tags: [replay]
+      summary: Replay-audit a completed case (FR-009, SC-002)
+      description: >
+        Reconstructs every AI output from stored OperationExecution snapshots and verifies
+        byte-identical match against the recorded delivered outputs. Verification is against
+        stored outputs — no fresh model calls are made.
+      operationId: replayCase
+      parameters: [{ $ref: '#/components/parameters/caseId' }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReplayReport' }
+        '409': { description: Case not in a replayable (completed) state }
+
+  /metrics/kpis:
+    get:
+      tags: [metrics]
+      summary: Phase 1 KPI series (FR-015)
+      operationId: getKpis
+      parameters:
+        - name: metric
+          in: query
+          schema:
+            type: string
+            enum: [rubric_first_pass_rate, package_completeness, case_cost_tokens]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KpiSample' }
+
+  /catalog/definitions:
+    get:
+      tags: [catalog]
+      summary: List published catalog definitions (read-only in Phase 1)
+      operationId: listDefinitions
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string, enum: [case_type, workflow, persona, playbook, template, rule, rubric, prompt] }
+        - name: key
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DefinitionSummary' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+
+  parameters:
+    caseId:
+      name: caseId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    submissionId:
+      name: submissionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    ValidationError:
+      description: Structured field-level validation failure
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              errors:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    field: { type: string }
+                    message: { type: string }
+
+  schemas:
+    ProblemSubmissionCreate:
+      type: object
+      required: [formData]
+      properties:
+        formData:
+          type: object
+          description: Structured Problem Form fields. Treated strictly as data (AD-12).
+        sensitivityTags:
+          type: array
+          items: { type: string }
+
+    ProblemSubmission:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [received, classified, confirmed] }
+        classification:
+          type: object
+          properties:
+            caseType: { type: string }
+            confidence: { type: number }
+            needsHumanConfirm: { type: boolean }
+
+    CaseInstance:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        featureId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [Submitted, Classified, Planned, Running, Waiting, Suspended, Escalated, Delivered, Cancelled]
+        mode: { type: string, enum: [mutating, assessment] }
+        definitionSnapshot:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              key: { type: string }
+              version: { type: string }
+        tokenBudget: { type: integer }
+        tokensSpent: { type: integer }
+        personaProgress:
+          type: array
+          items:
+            type: object
+            properties:
+              sequenceNo: { type: integer }
+              personaKey: { type: string }
+              status: { type: string, enum: [pending, running, validated, escalated] }
+              attempts: { type: integer, maximum: 3 }
+
+    Escalation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        personaInvocationId: { type: string, format: uuid }
+        failedAttempts: { type: integer }
+        lastValidationResult:
+          type: object
+          properties:
+            weightedScore: { type: number }
+            criticalFailures: { type: array, items: { type: string } }
+
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        subjectType: { type: string }
+        subjectId: { type: string, format: uuid }
+        action: { type: string }
+        actor: { type: string }
+        txTime: { type: string, format: date-time }
+        details: { type: object }
+
+    ExecutionPackage:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        manifest:
+          type: array
+          items:
+            type: object
+            properties:
+              artifactType: { type: string }
+              artifactRevisionId: { type: string, format: uuid }
+              contentHash: { type: string, description: SHA-256 hex }
+        manifestHash: { type: string }
+        handoverRecord: { $ref: '#/components/schemas/HandoverRecord' }
+
+    HandoverRecord:
+      type: object
+      description: Full-provenance set — all six fields are mandatory (FR-008).
+      required: [contentsIndex, submissionRef, definitionSnapshotRef, artifactHashes, decisionLogRef, owner]
+      properties:
+        contentsIndex: { type: array, items: { type: string } }
+        submissionRef: { type: string, format: uuid }
+        definitionSnapshotRef: { type: string, format: uuid }
+        artifactHashes:
+          type: array
+          items:
+            type: object
+            properties:
+              artifact: { type: string }
+              hash: { type: string }
+        decisionLogRef: { type: string }
+        owner:
+          type: object
+          required: [name, nextAction]
+          properties:
+            name: { type: string }
+            nextAction: { type: string }
+
+    ReplayReport:
+      type: object
+      properties:
+        caseId: { type: string, format: uuid }
+        totalOperations: { type: integer }
+        matched: { type: integer }
+        mismatched: { type: integer }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              operationExecutionId: { type: string, format: uuid }
+              byteIdentical: { type: boolean }
+              snapshotComplete: { type: boolean, description: prompt/model/inputs/knowledge all present (FR-006) }
+
+    DefinitionSummary:
+      type: object
+      properties:
+        key: { type: string }
+        version: { type: string }
+        type: { type: string }
+        status: { type: string, enum: [Draft, Published, Deprecated] }
+        locale: { type: string }
+        checksum: { type: string }
+
+    KpiSample:
+      type: object
+      properties:
+        metric: { type: string }
+        caseId: { type: string, format: uuid }
+        value: { type: number }
+        at: { type: string, format: date-time }

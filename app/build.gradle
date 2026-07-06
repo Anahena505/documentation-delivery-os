@@ -1,0 +1,26 @@
+apply plugin: 'org.springframework.boot'
+
+dependencies {
+    implementation project(':catalog')
+    implementation project(':tenancy')
+    implementation project(':intake')
+    implementation project(':casecore')
+    implementation project(':orchestration')
+    implementation project(':persona')
+    implementation project(':artifacts')
+    implementation project(':observability')
+    implementation project(':replay')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.flowable:flowable-spring-boot-starter'
+    implementation 'org.flowable:flowable-spring-boot-starter-dmn'
+    runtimeOnly 'org.postgresql:postgresql'
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+
+    testImplementation project(':test-support')
+    testImplementation platform('software.amazon.awssdk:bom:2.28.29')
+    testImplementation 'software.amazon.awssdk:s3'
+}

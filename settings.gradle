@@ -1,0 +1,18 @@
+rootProject.name = 'documentation-delivery-os'
+
+// Application bootstrap module (Spring Boot entrypoint, depends on all bounded contexts)
+include 'app'
+
+// One module per bounded context (modular monolith — PD-1, plan.md Project Structure)
+include 'catalog'
+include 'tenancy'
+include 'intake'
+include 'casecore'
+include 'orchestration'
+include 'persona'
+include 'artifacts'
+include 'observability'
+include 'replay'
+
+// Shared test support (Testcontainers fixtures, ArchUnit rules)
+include 'test-support'
