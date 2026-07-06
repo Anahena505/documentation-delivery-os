@@ -4,19 +4,26 @@ spring:
   # Runtime datasource connects as the least-privilege d2os_app role (V8 migration) — NOT the
   # table-owning role — so RLS policies actually apply (Postgres exempts table owners from RLS
   # by default; a same-user setup would make every RLS policy in V2-V7 a no-op).
+  #
+  # NOTE: no default values for passwords — they MUST be supplied via environment variables (see
+  # .env.example). Usernames/URLs keep dev defaults since they are not secrets.
   datasource:
     url: ${D2OS_DB_URL:jdbc:postgresql://localhost:5432/d2os}
     username: ${D2OS_DB_APP_USER:d2os_app}
-    password: ${D2OS_DB_APP_PASSWORD:d2os_app}
+    password: ${D2OS_DB_APP_PASSWORD}
   # Flyway runs as the schema-owning role — separate credentials, separate connection.
   flyway:
     enabled: true
     url: ${D2OS_DB_URL:jdbc:postgresql://localhost:5432/d2os}
     user: ${D2OS_DB_OWNER_USER:d2os_owner}
-    password: ${D2OS_DB_OWNER_PASSWORD:d2os_owner}
+    password: ${D2OS_DB_OWNER_PASSWORD}
     # Migrations live in each bounded-context module under db/migration; globally version-ordered.
     locations: classpath:db/migration
     baseline-on-migrate: true
+    # V8__app_role.sql provisions the d2os_app login role; its password comes from here (env-driven),
+    # never hardcoded in the migration SQL.
+    placeholders:
+      approlepassword: ${D2OS_DB_APP_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -35,6 +42,7 @@ d2os:
     # Provider-agnostic; the gateway is the sole call site (AS-5, Principle II).
     provider: ${D2OS_AI_PROVIDER:anthropic}
     model: ${D2OS_AI_MODEL:claude-sonnet-5}
+    api-key: ${D2OS_AI_API_KEY:}
   validation:
     rubric-pass-threshold: 0.80   # weighted ≥80% AND no critical fail (FR-005)
     max-generations: 3            # original + 2 revises, then escalate (FR-005)
@@ -42,7 +50,7 @@ d2os:
     endpoint: ${D2OS_STORAGE_ENDPOINT:http://localhost:9000}
     bucket: ${D2OS_STORAGE_BUCKET:d2os-artifacts}
     access-key: ${D2OS_STORAGE_ACCESS_KEY:d2os}
-    secret-key: ${D2OS_STORAGE_SECRET_KEY:d2os_minio_secret}
+    secret-key: ${D2OS_STORAGE_SECRET_KEY}
 
 server:
   port: 8080

@@ -7,15 +7,16 @@
 -- application.yml — spring.datasource.* now points at this role; spring.flyway.* keeps using the
 -- owner). Because d2os_app does not own any table, every RLS policy applies to it in full.
 --
--- Dev-only convenience: this migration creates the role with a fixed password matching
--- docker-compose.yml. A real deployment provisions this role (and its password/rotation) via
--- infra-as-code / a secrets manager, not a SQL migration — the GRANT/REVOKE statements below are
--- the actual security contract; the CREATE ROLE block is a local-dev bootstrap only.
+-- The role password is injected from the Flyway placeholder ${approlepassword} (bound to the
+-- D2OS_DB_APP_PASSWORD env var in application.yml) — never hardcoded in this committed SQL. A real
+-- deployment provisions this role (and its password/rotation) via infra-as-code / a secrets
+-- manager; the GRANT/REVOKE statements below are the actual security contract, the CREATE ROLE
+-- block is a local-dev/test bootstrap only.
 
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'd2os_app') THEN
-        CREATE ROLE d2os_app LOGIN PASSWORD 'd2os_app';
+        CREATE ROLE d2os_app LOGIN PASSWORD '${approlepassword}';
     END IF;
 END
 $$;
