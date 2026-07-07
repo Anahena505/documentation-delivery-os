@@ -56,9 +56,11 @@ publishes a candidate without pre-filter → redaction → D4 in order (Q5, Prin
 never mutates historical snapshots (FR-015/016); personas never write knowledge directly (AD-8,
 FR-019)
 
-**Scale/Scope**: 1 new Gradle module, ~7 new tables (2 Flyway migrations V13–V14), 1 new BPMN
-process (knowledge-capture), 1 new persona + playbook + rubric + prompt set (Curator), ~8 new API
-endpoints, 1 AI Gateway operation (embed), 6 new integration test suites, seed KnowledgeItem set
+**Scale/Scope**: 1 new Gradle module, 6 new tables (Flyway migrations V13–V16: V13 knowledge core,
+V14 injection snapshot + `operation_execution.evaluation`, V15 `knowledge_influence` KPI widening,
+V16 knowledge_item immutability trigger), 1 new BPMN process (knowledge-capture), 1 new persona +
+playbook + rubric + prompt set (Curator), ~8 new API endpoints, 1 AI Gateway operation (embed),
+6 new integration test suites, seed KnowledgeItem set
 
 ## Constitution Check
 
@@ -73,9 +75,14 @@ endpoints, 1 AI Gateway operation (embed), 6 new integration test suites, seed K
 | V | Default-Deny Security & Auditable Gates | ✅ PASS | Promotion is default-deny by construction: candidates are born project-confidential/non-promotable; the only publish path is pre-filter → Curator redaction (sensitive fields excluded by default, version-controlled) → D4 human gate, each step producing an auditable record; any rejection leaves the candidate non-promotable with a recorded reason. Deprecation is an audited governance action that flags affected executions without rewriting history. |
 
 **Post-design re-check (after data-model + contracts)**: no violations introduced — all new tables
-carry `workspace_id` + RLS; the D4 gate is a human decision recorded as a Decision row (the
-first-class gate subprocess remains Phase 5); no schema mutation of Phase 1/2 tables (only additive
-FKs to `operation_execution`). **GATE: PASS.**
+carry `workspace_id` + RLS; the D4 capture gate is a human decision recorded as a Decision row (the
+first-class gate subprocess remains Phase 5). The only changes to Phase 1/2 tables are additive: an
+FK-carrying `knowledge_injection_snapshot` referencing `operation_execution`, and one additive
+`operation_execution.evaluation BOOLEAN DEFAULT false` column (V14, R9) plus the `kpi_sample.metric`
+CHECK widening + `dimensions JSONB` column (V15, R9) — no existing column is altered or dropped.
+(Note: knowledge-item *deprecation* is recorded as an AuditEntry, not a Decision row — the V4
+`decision` table is case-bound and D-gate-CHECK-constrained; see data-model.md and T040.)
+**GATE: PASS.**
 
 ## Project Structure
 
@@ -123,8 +130,8 @@ orchestration/
 ├── src/main/resources/processes/knowledge-capture.bpmn20.xml  # NEW: capture → prefilter →
 │   │                                                          #   curator task → D4 userTask
 ├── src/main/java/com/d2os/orchestration/
-│   ├── CaseDeliveredKnowledgeTrigger.java  # NEW: starts capture process on Delivered (outbox)
-│   ├── CuratorStepDelegate.java            # NEW: runs Curator persona op (reuses PersonaStep path)
+│   ├── CaseDeliveredKnowledgeTrigger.java  # NEW: starts capture on Delivered (scheduled history sweep, T035)
+│   ├── CuratorStepDelegate.java            # NEW: v1 deterministic redaction; persona path deferred (T036)
 │   └── PreFilterDelegate.java              # NEW: deterministic sensitivity/PII pass
 catalog/                       # + CatalogSeedLoader v3 seed set (Curator persona/playbook/rubric/
 │                              #   prompts, seed KnowledgeItems)

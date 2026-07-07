@@ -53,12 +53,14 @@ phase exit criteria demonstrated.
 
 ### 4. Capture → pre-filter → redaction → D4 → publish (SC-005, SC-006) — `CapturePromotionIT`
 
-1. Drive a demo case to `Delivered` → `knowledge-capture` process starts (outbox trigger);
-   candidates appear `CAPTURED`, project-confidential (`GET /knowledge/candidates`).
+1. Drive a demo case to `Delivered` → `knowledge-capture` process starts (via the scheduled
+   case-end history sweep, T035); candidates appear `CAPTURED`, project-confidential
+   (`GET /knowledge/candidates`).
 2. Pre-filter runs: seeded PII (email/phone/tagged-sensitive field) produces `prefilter_finding`
    rows; sensitive-tagged fields already excluded from candidate content; status `PREFILTERED`.
-3. Curator persona drafts redaction (rubric-validated, stub gateway); save via
-   `POST .../redaction` → new revision, status `REDACTED`; prior revision intact.
+3. Curator gate produces the redaction (v1: deterministic — the pre-filter already excluded PII, no
+   rubric scored on the automated path, T036); the manual `POST .../redaction` path also creates a
+   new revision, status `REDACTED`, prior revision intact.
 4. D4 via `POST .../d4`:
    - approver == redaction actor → `403` (non-self-satisfiable);
    - workspace owner APPROVE → candidate `PUBLISHED`, KnowledgeItem version created with
@@ -110,7 +112,7 @@ assertions above.
 | 6 | SC-008 (measured delta / not-yet-measurable) | InfluenceKpiIT |
 | 7 | SC-009 (Phase 1+2 criteria unchanged) | existing suites |
 
-## Success checklist (T040 — phase exit)
+## Success checklist (T050 — phase exit)
 
 Run `docker run --rm -v "$PWD":/w -w /w gradle:8.10-jdk21 gradle :app:test` and confirm:
 

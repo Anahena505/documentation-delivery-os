@@ -3,8 +3,10 @@
 **Feature**: 003-knowledge-layer · **Date**: 2026-07-07
 Delta over the Phase 1–2 schema (V1–V12). All new tables carry `workspace_id uuid NOT NULL` with
 the standard RLS policy (`app.workspace_id` session setting) and are granted to `d2os_app` per
-V8's default privileges. Migrations: **V13** (knowledge module), **V14** (persona module).
-Research references: [research.md](research.md) R2, R4–R9.
+V8's default privileges. Migrations: **V13** (knowledge core, knowledge module), **V14** (injection
+snapshot + `operation_execution.evaluation`, persona module), **V15** (`knowledge_influence` KPI
+CHECK widening + `dimensions`, observability module), **V16** (knowledge_item immutability trigger,
+knowledge module). Research references: [research.md](research.md) R2, R4–R9.
 
 ## New Entities
 
@@ -20,7 +22,7 @@ including a Curator redaction — produces a new version row; versions are never
 | workspace_id | uuid NOT NULL | partition key + RLS scope |
 | key | text NOT NULL | stable identity across versions |
 | version | int NOT NULL | UNIQUE (workspace_id, key, version) |
-| scope_level | text NOT NULL | `WORKSPACE` \| `PROJECT` (`GLOBAL` reserved, unreachable v1 — R4) |
+| scope_level | text NOT NULL | `WORKSPACE` \| `PROJECT`. The CHECK also admits `GLOBAL`, but it is **reserved/unreachable in v1**: `knowledge_item` is LIST-partitioned per workspace, so a row cannot live outside some workspace's partition, and the retrieval scope-lattice defines no GLOBAL semantics. Cross-workspace sharing (Phase 6) is expected to be copy-on-subscribe, not in-place GLOBAL scope (R4). |
 | scope_ref | uuid NOT NULL | workspace id or project id per scope_level |
 | tags | text[] NOT NULL | retrieval tag match |
 | locale | text NOT NULL DEFAULT 'en' | carries the Q11 locale dimension forward |
@@ -35,8 +37,12 @@ including a Curator redaction — produces a new version row; versions are never
 | created_at / deprecated_at | timestamptz | `deprecated_at` set by DeprecationService |
 | deprecation_reason | text NULL | required when status=DEPRECATED |
 
-**State transitions**: `PUBLISHED → DEPRECATED` only (audited governance action + Decision row).
-No other transition exists; correction = publish a new version.
+**State transitions**: `PUBLISHED → DEPRECATED` only (audited governance action recorded as an
+**AuditEntry**, not a Decision row — the V4 `decision` table is case-bound + D-gate-CHECK-constrained,
+so it cannot hold a case-independent knowledge deprecation; see research.md R8 / tasks.md T040).
+No other transition exists; correction = publish a new version. All non-status columns
+(content/hash/embedding/key/version/…) are **immutable after insert**, enforced by the V16 trigger,
+so the byte-for-byte guarantee that injection snapshots depend on cannot be silently broken.
 **Invariants**: retrieval predicate always includes `status='PUBLISHED'` and scope
 ancestor-or-equal (R10); seed set loaded via CatalogSeedLoader-style loader with provenance
 (FR-021).
@@ -152,10 +158,10 @@ by ordering on `position` and verifying `content_hash` against the snapshotted i
 
 | Entity | Change |
 |---|---|
-| `operation_execution` (V5, casecore) | **No column change.** Gains child rows in `knowledge_injection_snapshot`; influence-evaluation runs add `evaluation boolean NOT NULL DEFAULT false` (V14) so evaluation executions never feed delivery (R9). |
+| `operation_execution` (V5, casecore) | **Additive column** `evaluation boolean NOT NULL DEFAULT false` (V14) so influence-evaluation runs never feed delivery or dilute delivery KPIs (R9); also gains child rows in `knowledge_injection_snapshot`. No existing column altered. |
 | `AiGatewayClient` (persona) | + `embed(EmbedRequest)` operation; injection path asserts caller workspace vs. every injected item's workspace (T2-c) before prompt assembly — refusal is audited. |
 | `PersonaDefinition` (catalog, content-level) | Knowledge profile (allowed tags/domains) carried in the definition body — a **content** addition to the Curator + existing persona definitions via new published versions; no catalog schema change. |
-| `kpi_sample` (V9, observability) | **No schema change.** New metric name `knowledge_influence` with item key/version tags (R9). |
+| `kpi_sample` (V9, observability) | **V15 widening** (the V9 `metric` CHECK forbids unknown names, so a schema change is required): the `metric` CHECK is re-created to include `knowledge_influence`, and a `dimensions JSONB DEFAULT '{}'` column + partial index on `(dimensions->>'key', dimensions->>'version')` carry the item key/version (R9, T046). |
 
 ## Relationships (summary)
 

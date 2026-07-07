@@ -4,6 +4,10 @@ dependencies {
     implementation project(':persona')
     implementation project(':artifacts')
     implementation project(':observability')
+    // Phase 3 US2: the knowledge-capture BPMN delegates (PreFilterDelegate, CuratorStepDelegate) and the
+    // Delivered→capture outbox trigger drive the knowledge capture services. knowledge does NOT depend on
+    // orchestration, so orchestration → knowledge is acyclic (persona ← knowledge stays one-way).
+    implementation project(':knowledge')
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.flowable:flowable-spring-boot-starter'

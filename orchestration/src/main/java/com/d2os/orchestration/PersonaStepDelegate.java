@@ -37,12 +37,20 @@ public class PersonaStepDelegate implements JavaDelegate {
         UUID workspaceId = UUID.fromString((String) execution.getVariable("workspaceId"));
         String personaKey = execution.getCurrentActivityId();
 
+        // A concurrent (parallel-branch) execution has a parent scope; the top-level sequential
+        // execution does not. Tag parallel steps with their branch execution id (US2, T024); leave
+        // sequential steps null so replay/reconciliation can tell them apart.
+        String branchId = execution.getParentId() != null ? execution.getId() : null;
+
         WorkspaceContext.set(workspaceId);
         try {
             // Re-bind RLS on this job's transaction connection: Flowable checked it out before we
             // could set WorkspaceContext, so it currently carries the nil system workspace.
             workspaceRlsBinder.bindCurrentTransaction(workspaceId);
-            personaExecutionService.executePersona(caseId, personaKey);
+            boolean validated = personaExecutionService.executePersona(caseId, personaKey, branchId);
+            // Branch-local so the exclusive gateway right after a parallel specialist routes a failed
+            // branch to its escalation wait state (FR-005) without affecting sibling branches.
+            execution.setVariableLocal("validated", validated);
         } finally {
             WorkspaceContext.clear();
         }

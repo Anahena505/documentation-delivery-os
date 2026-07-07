@@ -40,6 +40,23 @@ public class AuditWriter {
                 UUID.randomUUID(), workspaceId, subjectType, subjectId, action, detailsJson));
     }
 
+    /**
+     * Audit an event in its OWN committed transaction (Phase 3, T036, T2-c). For security-violation
+     * audits the semantics are inverted from {@link #record}: the audit row must SURVIVE the caller's
+     * rollback — a blocked cross-workspace injection aborts the surrounding work by throwing, and a
+     * MANDATORY-propagated write would be swept away with it. {@code REQUIRES_NEW} commits the audit
+     * independently, so the attempt is durably recorded even though the operation itself was refused.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordDetached(UUID workspaceId, String subjectType, UUID subjectId, String action,
+                               String actor, Map<String, Object> details) {
+        String detailsJson = toJson(details);
+        auditRepository.save(new AuditEntryRecord(
+                UUID.randomUUID(), workspaceId, subjectType, subjectId, action, actor, detailsJson));
+        outboxRepository.save(new EventOutboxRecord(
+                UUID.randomUUID(), workspaceId, subjectType, subjectId, action, detailsJson));
+    }
+
     private String toJson(Map<String, Object> details) {
         try {
             return objectMapper.writeValueAsString(details == null ? Map.of() : details);

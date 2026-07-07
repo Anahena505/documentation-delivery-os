@@ -11,5 +11,6 @@ public record ReplayReport(
         int mismatched,
         List<OperationResult> results
 ) {
-    public record OperationResult(UUID operationExecutionId, boolean byteIdentical, boolean snapshotComplete) {}
+    public record OperationResult(UUID operationExecutionId, boolean byteIdentical, boolean snapshotComplete,
+                                  boolean knowledgeContextReproduced) {}
 }

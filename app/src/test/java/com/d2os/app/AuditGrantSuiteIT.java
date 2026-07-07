@@ -51,6 +51,11 @@ class AuditGrantSuiteIT {
                     "d2os_app must not be able to DELETE from audit_entry");
             assertThrows(SQLException.class, () -> exec(conn, "UPDATE event_outbox SET event_type = 'tampered' WHERE 1 = 0"),
                     "d2os_app must not be able to UPDATE event_outbox");
+            // progress_event is append-only too (T048, T6-a): INSERT/SELECT allowed, mutation denied.
+            assertThrows(SQLException.class, () -> exec(conn, "UPDATE progress_event SET kind = 'tampered' WHERE 1 = 0"),
+                    "d2os_app must not be able to UPDATE progress_event");
+            assertThrows(SQLException.class, () -> exec(conn, "DELETE FROM progress_event WHERE 1 = 0"),
+                    "d2os_app must not be able to DELETE from progress_event");
         }
     }
 

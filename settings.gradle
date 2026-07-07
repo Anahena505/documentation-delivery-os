@@ -13,6 +13,8 @@ include 'persona'
 include 'artifacts'
 include 'observability'
 include 'replay'
+// Knowledge bounded context (Phase 3 — governed KnowledgeItem lifecycle + retrieval OHS)
+include 'knowledge'
 
 // Shared test support (Testcontainers fixtures, ArchUnit rules)
 include 'test-support'

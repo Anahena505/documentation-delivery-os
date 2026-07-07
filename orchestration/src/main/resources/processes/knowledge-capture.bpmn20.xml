@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://d2os.com/bpmn"
+             id="d2os-knowledge-capture-definitions">
+
+  <!--
+    Knowledge capture → promotion pipeline (Phase 3, US2, T019, research R6). A STANDALONE process,
+    entirely separate from initiation-v2 — the initiation/assessment/enhancement workflows are UNTOUCHED.
+    Started by CaseDeliveredKnowledgeTrigger when a Case reaches Delivered, with the case id as the
+    business key and `caseInstanceId` + `workspaceId` process variables.
+
+    Fixed-order, default-deny gates (no skip path):
+      capture (CaptureService, one CAPTURED candidate) →
+      prefilter (SensitivityPreFilter, CAPTURED→PREFILTERED, PII redacted by default, PREFILTER gate PASS) →
+      curator (CuratorStepDelegate, v1 DETERMINISTIC redaction of the already-PII-excluded content →
+               RedactionService new revision, PREFILTERED→REDACTED→D4_PENDING, CURATION gate PASS; no
+               rubric is scored on this automated path — the persona/rubric are seeded for a later
+               capture-time snapshot. The substantive human gate in v1 is D4 below) →
+      d4-review (workspace-owner human task, modeled as a receiveTask wait) →
+      exclusive gateway on the human D4 outcome → published | rejected end.
+
+    Human D4 wait: modeled as a receiveTask and released by runtimeService.trigger, mirroring the Phase 2
+    EscalationBridge/initiation-v2 receiveTask pattern (embedded Flowable, no external user-task client).
+    The authoritative D4 decision (publish-on-APPROVE / reject, Decision + AuditEntry, all atomic) is
+    performed by the POST /knowledge/candidates/{id}/d4 endpoint (PromotionGateService.decideD4); the
+    endpoint sets the `d4Approved` variable and triggers this wait so the process records the outcome and
+    completes. The gateway therefore routes on the outcome the endpoint already committed — the process is
+    the audit spine, not a second publisher (no double-publish).
+  -->
+  <process id="knowledge-capture" name="Knowledge Capture &amp; Promotion" isExecutable="true">
+
+    <startEvent id="start"/>
+    <sequenceFlow id="c0" sourceRef="start" targetRef="capture"/>
+
+    <serviceTask id="capture" name="Capture candidates"
+                 flowable:async="true" flowable:delegateExpression="${captureStepDelegate}"/>
+    <sequenceFlow id="c1" sourceRef="capture" targetRef="prefilter"/>
+
+    <serviceTask id="prefilter" name="Sensitivity pre-filter"
+                 flowable:async="true" flowable:delegateExpression="${preFilterDelegate}"/>
+    <sequenceFlow id="c2" sourceRef="prefilter" targetRef="curator"/>
+
+    <serviceTask id="curator" name="Curator redaction"
+                 flowable:async="true" flowable:delegateExpression="${curatorStepDelegate}"/>
+    <sequenceFlow id="c3" sourceRef="curator" targetRef="d4-review"/>
+
+    <!-- D4 human gate (workspace-owner). Modeled as a receiveTask wait; released by the D4 endpoint's
+         runtimeService.trigger once the decision is committed (EscalationBridge-style wait). -->
+    <receiveTask id="d4-review" name="Await workspace-owner D4 decision"/>
+    <sequenceFlow id="c4" sourceRef="d4-review" targetRef="gw-d4"/>
+
+    <exclusiveGateway id="gw-d4" default="d4-reject"/>
+    <sequenceFlow id="d4-approve" sourceRef="gw-d4" targetRef="published">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${d4Approved}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="d4-reject" sourceRef="gw-d4" targetRef="rejected"/>
+
+    <endEvent id="published" name="Candidate published"/>
+    <endEvent id="rejected" name="Candidate rejected"/>
+  </process>
+</definitions>

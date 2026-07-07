@@ -4,6 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * D2OS Phase 1 bootstrap — single deployable modular monolith (PD-1).
@@ -18,6 +19,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 @SpringBootApplication(scanBasePackages = "com.d2os")
 @EntityScan(basePackages = "com.d2os")
 @EnableJpaRepositories(basePackages = "com.d2os")
+@EnableScheduling   // ReconciliationJob dual-state sweep (T025, FR-010)
 public class D2osApplication {
     public static void main(String[] args) {
         SpringApplication.run(D2osApplication.class, args);

@@ -33,6 +33,14 @@ public class PersonaInvocation {
     @Column(name = "sequence_no", nullable = false)
     private int sequenceNo;
 
+    /** BPMN branch (execution/activity id) for parallel-block steps; NULL for sequential steps (US2, V11). */
+    @Column(name = "branch_id")
+    private String branchId;
+
+    /** The real persona key this invocation ran (e.g. security-architect); replaces persona-N inference (V11). */
+    @Column(name = "persona_key")
+    private String personaKey;
+
     @Column(nullable = false)
     private String status = Status.pending.name();
 
@@ -52,10 +60,14 @@ public class PersonaInvocation {
     }
 
     public void markStatus(Status s) { this.status = s.name(); }
+    public void setBranchId(String branchId) { this.branchId = branchId; }
+    public void setPersonaKey(String personaKey) { this.personaKey = personaKey; }
 
     public UUID getId() { return id; }
     public UUID getWorkspaceId() { return workspaceId; }
     public UUID getCaseInstanceId() { return caseInstanceId; }
     public String getStatus() { return status; }
     public int getSequenceNo() { return sequenceNo; }
+    public String getBranchId() { return branchId; }
+    public String getPersonaKey() { return personaKey; }
 }

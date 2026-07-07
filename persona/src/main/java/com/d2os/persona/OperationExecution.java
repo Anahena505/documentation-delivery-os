@@ -64,6 +64,12 @@ public class OperationExecution {
     @Column(name = "tokens_used", nullable = false)
     private long tokensUsed;
 
+    // Phase 3 (US4, V14): true for the paired influence-evaluation runs so they are excluded from
+    // delivery/normal listings. Delivery packages are assembled from artifacts (never operation_execution),
+    // so an evaluation run cannot reach a package regardless; this flag marks it for operation-level filters.
+    @Column(nullable = false)
+    private boolean evaluation = false;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
@@ -89,6 +95,11 @@ public class OperationExecution {
         this.validationResult = validationResult;
         this.tokensUsed = tokensUsed;
     }
+
+    /** Mark this row as an influence-evaluation run (US4). Set before the single INSERT; never updated after. */
+    void markEvaluation() { this.evaluation = true; }
+
+    public boolean isEvaluation() { return evaluation; }
 
     public UUID getId() { return id; }
     public UUID getPersonaInvocationId() { return personaInvocationId; }

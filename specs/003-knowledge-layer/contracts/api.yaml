@@ -153,9 +153,12 @@ paths:
       tags: [candidates]
       summary: Save the Curator redaction as a new candidate revision (FR-011, US2)
       description: >
-        Accepts the human-confirmed redacted content produced with the Curator persona's
-        rubric-validated draft. Creates a NEW revision (prior revision preserved for audit);
-        transitions PREFILTERED → REDACTED. Only the latest revision proceeds to D4.
+        Accepts human-confirmed redacted content for the candidate. Creates a NEW revision (prior
+        revision preserved for audit); transitions PREFILTERED → REDACTED. Only the latest revision
+        proceeds to D4. Note (v1): the BPMN capture path produces this redaction deterministically
+        (the pre-filter has already excluded sensitive spans) and does NOT score the curation rubric;
+        the curation rubric is applied only when the Curator op runs through the persona path, which
+        v1 does not do. The substantive human gate in v1 is D4. See spec.md FR-009/FR-012.
       operationId: saveRedaction
       parameters: [{ $ref: '#/components/parameters/candidateId' }]
       requestBody:
@@ -214,10 +217,12 @@ paths:
       tags: [metrics]
       summary: Run a paired with/without influence evaluation for an item (FR-017, US4)
       description: >
-        Executes the referenced operation twice under identical inputs and rubric version
-        (with the item force-included, then force-excluded), both as real snapshot-recorded
-        executions flagged evaluation=true, and emits kpi_sample
-        metric=knowledge_influence with the rubric-score delta.
+        Runs the given persona step within the case's pinned CaseDefinitionSnapshot twice under
+        identical inputs and the SAME pinned rubric version (with the item force-included, then
+        force-excluded), both as real snapshot-recorded executions flagged evaluation=true (so they
+        never feed delivery), and emits kpi_sample metric=knowledge_influence with the rubric-score
+        delta. The case+persona pair (not a bare operation key) is required because a rubric version
+        only resolves through a case's pinned snapshot (Principle I).
       operationId: runInfluenceEvaluation
       parameters: [{ $ref: '#/components/parameters/itemId' }]
       requestBody:
@@ -226,29 +231,36 @@ paths:
           application/json:
             schema:
               type: object
-              required: [operationDefinitionKey]
+              required: [caseId, personaKey]
               properties:
-                operationDefinitionKey: { type: string }
+                caseId: { type: string, format: uuid, description: Case whose pinned snapshot supplies the rubric }
+                personaKey: { type: string, description: Persona step whose pinned rubric scores the paired runs }
       responses:
-        '202': { description: Evaluation started (async; result lands as a KPI sample) }
+        '202':
+          description: Evaluation completed; the measured delta was emitted as a knowledge_influence KPI sample
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InfluenceResult' }
 
   /metrics/knowledge-influence:
     get:
       tags: [metrics]
       summary: Read knowledge-influence values per item (FR-018)
       operationId: getKnowledgeInfluence
+      description: >
+        Identify the item version either by itemId, or by key+version. Returns its influence reading.
       parameters:
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
         - { name: key, in: query, schema: { type: string } }
+        - { name: version, in: query, schema: { type: integer } }
       responses:
         '200':
           description: >
-            Per item: measured delta samples, or state=NOT_YET_MEASURABLE for an item never
-            injected/evaluated (never a fabricated value).
+            The item's reading: status=MEASURED with the sample series + latestDelta, or
+            status=NOT_YET_MEASURABLE for an item never injected/evaluated (never a fabricated value).
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/InfluenceReading' }
+              schema: { $ref: '#/components/schemas/InfluenceReading' }
 
 components:
   securitySchemes:
@@ -337,14 +349,26 @@ components:
     InfluenceReading:
       type: object
       properties:
+        status: { type: string, enum: [MEASURED, NOT_YET_MEASURABLE] }
         key: { type: string }
         version: { type: integer }
-        state: { type: string, enum: [MEASURED, NOT_YET_MEASURABLE] }
+        latestDelta: { type: number, nullable: true, description: Null when NOT_YET_MEASURABLE (never fabricated) }
         samples:
           type: array
           items:
             type: object
             properties:
-              delta: { type: number }
-              operationDefinitionKey: { type: string }
-              recordedAt: { type: string, format: date-time }
+              value: { type: number, description: Measured with-minus-without rubric-score delta }
+              at: { type: string, format: date-time }
+    InfluenceResult:
+      type: object
+      description: The synchronous outcome of a paired influence evaluation (POST influence-evaluations).
+      properties:
+        itemId: { type: string, format: uuid }
+        key: { type: string }
+        version: { type: integer }
+        withScore: { type: number }
+        withoutScore: { type: number }
+        delta: { type: number, description: withScore - withoutScore (the emitted knowledge_influence value) }
+        withExecutionId: { type: string, format: uuid }
+        withoutExecutionId: { type: string, format: uuid }

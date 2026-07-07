@@ -1,5 +1,6 @@
 package com.d2os.app;
 
+import com.d2os.app.support.StubAiGatewayClient;
 import com.d2os.testsupport.ContainerFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -7,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -18,19 +20,25 @@ import org.springframework.test.context.DynamicPropertySource;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Cross-tenant leakage suite (T047/T048, US3, SC-003). Creates a Case in workspace ALPHA and proves
  * workspace BETA cannot read it through the API — RLS returns not-found, indistinguishable from a
- * genuinely absent record (contracts/api.yaml). This is the API-level counterpart to the DB-level
- * RLS proof done directly against Postgres earlier in the build.
+ * genuinely absent record (contracts/api.yaml). Phase 2 (T046, SC-008) adds a concurrent two-workspace
+ * scenario: two full Cases run their parallel specialist blocks at the same time, and RLS still keeps
+ * each workspace blind to the other's runtime rows under genuine concurrency (Principle IV, research R4).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(StubAiGatewayClient.class)
 class LeakageSuiteIT {
 
     @LocalServerPort int port;
@@ -40,6 +48,7 @@ class LeakageSuiteIT {
     private static final UUID ALPHA = UUID.randomUUID();
     private static final UUID BETA = UUID.randomUUID();
     private static UUID alphaFeatureId;
+    private static UUID betaFeatureId;
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
@@ -61,6 +70,7 @@ class LeakageSuiteIT {
         seedWorkspace(ALPHA);
         alphaFeatureId = seedWorkspaceFeature(ALPHA);
         seedWorkspace(BETA);
+        betaFeatureId = seedWorkspaceFeature(BETA);
     }
 
     @Test
@@ -87,6 +97,70 @@ class LeakageSuiteIT {
         assertNotEquals(200, crossRead.getStatusCode().value(),
                 "BETA must NOT be able to read ALPHA's case (SC-003)");
         assertEquals(404, crossRead.getStatusCode().value());
+    }
+
+    @Test
+    void concurrentCasesInTwoWorkspacesDoNotLeakDuringParallelBlock() throws Exception {
+        HttpHeaders alpha = headers(ALPHA), beta = headers(BETA);
+
+        // Start both Cases; the engine's async executor runs their parallel specialist blocks
+        // concurrently (no threads needed here — /start returns 202 and execution proceeds async).
+        String alphaCase = submitOpenAndStart(alpha, alphaFeatureId);
+        String betaCase = submitOpenAndStart(beta, betaFeatureId);
+
+        assertEquals("Delivered", poll(alphaCase, alpha, Duration.ofSeconds(200)),
+                "ALPHA's case should deliver while BETA runs concurrently");
+        assertEquals("Delivered", poll(betaCase, beta, Duration.ofSeconds(200)),
+                "BETA's case should deliver while ALPHA runs concurrently");
+
+        // The two ran their parallel blocks at the same time; RLS still isolates their runtime rows.
+        assertTrue(operationsVisibleUnder(ALPHA, alphaCase) > 0, "ALPHA must see its own operations");
+        assertTrue(operationsVisibleUnder(BETA, betaCase) > 0, "BETA must see its own operations");
+        assertEquals(0L, operationsVisibleUnder(ALPHA, betaCase),
+                "ALPHA must NOT see BETA's operations even under concurrency (SC-008)");
+        assertEquals(0L, operationsVisibleUnder(BETA, alphaCase),
+                "BETA must NOT see ALPHA's operations even under concurrency (SC-008)");
+
+        // API cross-read is still a clean 404, indistinguishable from an absent record.
+        ResponseEntity<Map> crossRead = rest.exchange(url("/api/v1/cases/" + alphaCase),
+                HttpMethod.GET, new HttpEntity<>(beta), Map.class);
+        assertEquals(404, crossRead.getStatusCode().value(), "BETA must not read ALPHA's case");
+    }
+
+    private String submitOpenAndStart(HttpHeaders h, UUID feature) {
+        String submissionId = (String) post("/api/v1/submissions",
+                Map.of("formData", Map.of("category", "initiation")), h).getBody().get("id");
+        post("/api/v1/submissions/" + submissionId + "/confirm-classification",
+                Map.of("confirmedCaseType", "initiation"), h);
+        String caseId = (String) post("/api/v1/cases",
+                Map.of("submissionId", submissionId, "featureId", feature.toString()), h).getBody().get("id");
+        rest.exchange(url("/api/v1/cases/" + caseId + "/start"), HttpMethod.POST, new HttpEntity<>(null, h), Void.class);
+        return caseId;
+    }
+
+    private String poll(String caseId, HttpHeaders h, Duration timeout) throws InterruptedException {
+        Instant deadline = Instant.now().plus(timeout);
+        String status = null;
+        while (Instant.now().isBefore(deadline)) {
+            ResponseEntity<Map> r = rest.exchange(url("/api/v1/cases/" + caseId), HttpMethod.GET, new HttpEntity<>(h), Map.class);
+            status = (String) r.getBody().get("status");
+            if ("Delivered".equals(status) || "Escalated".equals(status) || "Suspended".equals(status)) return status;
+            Thread.sleep(500);
+        }
+        return status;
+    }
+
+    /** Count operation_execution rows for {@code caseId} that are visible when RLS is bound to {@code ws}. */
+    private long operationsVisibleUnder(UUID ws, String caseId) throws Exception {
+        try (Connection c = dataSource.getConnection()) {
+            exec(c, "SET app.workspace_id = '" + ws + "'");
+            String sql = "SELECT count(*) FROM operation_execution oe "
+                    + "JOIN persona_invocation pi ON pi.id = oe.persona_invocation_id "
+                    + "WHERE pi.case_instance_id = '" + caseId + "'";
+            try (PreparedStatement ps = c.prepareStatement(sql); ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : 0L;
+            }
+        }
     }
 
     private ResponseEntity<Map> post(String path, Object body, HttpHeaders headers) {

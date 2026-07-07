@@ -6,11 +6,18 @@ import com.d2os.casecore.CaseInstance;
 import com.d2os.casecore.CaseInstanceRepository;
 import com.d2os.catalog.DefinitionLookupService;
 import com.d2os.catalog.DefinitionView;
+import com.d2os.persona.gateway.WorkspaceScopeGuard;
+import com.d2os.persona.spi.AttachmentSummaryPort;
+import com.d2os.persona.spi.KnowledgeProvider;
 import com.d2os.persona.spi.SubmissionDataPort;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
@@ -29,17 +36,33 @@ public class ExecutionEnvelopeBuilder {
     private final DefinitionLookupService definitionLookup;
     private final SubmissionDataPort submissionDataPort;
     private final ObjectMapper objectMapper;
+    // ObjectProvider so persona-only slice tests (no knowledge module on the path) still wire this
+    // builder: getIfAvailable() yields null when no KnowledgeProvider bean exists → no injection (T013).
+    private final ObjectProvider<KnowledgeProvider> knowledgeProvider;
+    // ObjectProvider so persona-only slice tests (no intake on the path) still wire this builder:
+    // getIfAvailable() yields null when no AttachmentSummaryPort bean exists → no summaries (T044).
+    private final ObjectProvider<AttachmentSummaryPort> attachmentSummaryPort;
+    private final WorkspaceScopeGuard workspaceScopeGuard;
+    private final int maxItemsPerOperation;
 
     public ExecutionEnvelopeBuilder(CaseInstanceRepository caseRepository,
                                     CaseDefinitionSnapshotRepository snapshotRepository,
                                     DefinitionLookupService definitionLookup,
                                     SubmissionDataPort submissionDataPort,
-                                    ObjectMapper objectMapper) {
+                                    ObjectMapper objectMapper,
+                                    ObjectProvider<KnowledgeProvider> knowledgeProvider,
+                                    ObjectProvider<AttachmentSummaryPort> attachmentSummaryPort,
+                                    WorkspaceScopeGuard workspaceScopeGuard,
+                                    @Value("${d2os.knowledge.max-items-per-operation:5}") int maxItemsPerOperation) {
         this.caseRepository = caseRepository;
         this.snapshotRepository = snapshotRepository;
         this.definitionLookup = definitionLookup;
         this.submissionDataPort = submissionDataPort;
         this.objectMapper = objectMapper;
+        this.knowledgeProvider = knowledgeProvider;
+        this.attachmentSummaryPort = attachmentSummaryPort;
+        this.workspaceScopeGuard = workspaceScopeGuard;
+        this.maxItemsPerOperation = maxItemsPerOperation;
     }
 
     public PersonaEnvelope build(UUID caseId, String personaKey) {
@@ -60,12 +83,75 @@ public class ExecutionEnvelopeBuilder {
         String formDataJson = submissionDataPort.findFormDataJson(kase.getSubmissionId())
                 .orElseThrow(() -> new IllegalStateException("submission " + kase.getSubmissionId() + " not found"));
 
+        // US5 (T044, FR-015): sanitized attachment summaries only — never raw bytes. Empty when no
+        // AttachmentSummaryPort bean is on the path (persona-only slice tests) or the submission has none.
+        List<String> attachmentSummaries = resolveAttachmentSummaries(kase.getSubmissionId());
+
+        // Phase 3 (T013): resolve the persona's knowledge profile from its definition body, retrieve the
+        // entitled items, and assert workspace scope (T015) before they enter the envelope.
+        List<String> knowledgeProfile = extractKnowledgeProfile(personaDef.body());
+        List<KnowledgeProvider.InjectedItem> injectedKnowledge = retrieveKnowledge(kase, knowledgeProfile);
+        workspaceScopeGuard.assertSameWorkspace(kase.getWorkspaceId(), injectedKnowledge);
+        int estimatedInjectedTokens = estimateTokens(injectedKnowledge);
+
         return new PersonaEnvelope(
                 caseId, personaKey,
                 personaDef.id(), personaDef.version(),
                 promptDef.id(), promptDef.version(), extractTemplate(promptDef.body()),
                 rubricDef.id(), rubricDef.version(), rubricDef.body(),
-                formDataJson);
+                formDataJson,
+                injectedKnowledge, estimatedInjectedTokens,
+                attachmentSummaries);
+    }
+
+    /** Sanitized attachment summaries for the submission, or empty when none/no port is wired (T044). */
+    private List<String> resolveAttachmentSummaries(UUID submissionId) {
+        AttachmentSummaryPort port = attachmentSummaryPort.getIfAvailable();
+        if (port == null || submissionId == null) {
+            return List.of();
+        }
+        return port.findSummaryTexts(submissionId);
+    }
+
+    /**
+     * Retrieve governed knowledge for this operation. When no {@link KnowledgeProvider} bean is on the
+     * path (persona-only slice tests) or the profile is empty, returns an empty list — identical to
+     * pre-Phase-3 behavior. projectId is null in US1 (the seed set is WORKSPACE-scoped).
+     */
+    private List<KnowledgeProvider.InjectedItem> retrieveKnowledge(CaseInstance kase, List<String> profile) {
+        KnowledgeProvider provider = knowledgeProvider.getIfAvailable();
+        if (provider == null || profile.isEmpty()) {
+            return List.of();
+        }
+        KnowledgeProvider.KnowledgeQuery query = new KnowledgeProvider.KnowledgeQuery(
+                kase.getWorkspaceId(), null, profile, profile, maxItemsPerOperation);
+        return provider.retrieve(query);
+    }
+
+    /** Parse the persona definition body's {@code knowledgeProfile} string array (empty if absent). */
+    private List<String> extractKnowledgeProfile(String personaBody) {
+        List<String> profile = new ArrayList<>();
+        try {
+            JsonNode node = objectMapper.readTree(personaBody).path("knowledgeProfile");
+            if (node.isArray()) {
+                for (JsonNode tag : node) {
+                    profile.add(tag.asText());
+                }
+            }
+        } catch (Exception e) {
+            // A malformed/absent body means no profile → no injection (fail open to empty, not to error).
+            return List.of();
+        }
+        return profile;
+    }
+
+    /** Rough token estimate (~4 chars/token) for the injected content, charged against the case budget. */
+    private int estimateTokens(List<KnowledgeProvider.InjectedItem> items) {
+        int chars = 0;
+        for (KnowledgeProvider.InjectedItem item : items) {
+            if (item.content() != null) chars += item.content().length();
+        }
+        return chars / 4;
     }
 
     private DefinitionView resolve(String type, VersionRef ref) {

@@ -45,12 +45,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * Scenario 1). Uses {@link StubAiGatewayClient} in place of a live provider (none is configured in
  * this environment) and real Postgres 16 + MinIO via Testcontainers.
  *
- * <p><b>Verification status:</b> this test compiles and is structurally complete against the real
- * API contracts, but has not been executed green in this session — running it requires a Docker
- * socket reachable from the build environment (Testcontainers-in-Testcontainers), which this
- * session's sandbox does not have wired up. Individual primitives it exercises (migrations, RLS,
- * the state machine, the immutability trigger) were separately verified directly against a live
- * Postgres container earlier in this session.
+ * <p>Phase 2 (T019): the pipeline now runs the full 13-persona canonical suite via {@code
+ * initiation-v2}, so this test additionally asserts the delivered package covers every persona
+ * (SC-002) — not just that the Case reached Delivered (SC-001).
  */
 // StubAiGatewayClient MUST be explicitly @Import-ed: it's a @TestConfiguration, which Spring
 // deliberately excludes from component scanning (via TypeExcludeFilter), so @Import is the only
@@ -189,8 +186,9 @@ class SubmitToDeliverIT {
                 url("/api/v1/cases/" + caseId + "/start"), HttpMethod.POST, new HttpEntity<>(null, headers), Void.class);
         assertEquals(202, startResp.getStatusCode().value());
 
-        // 5. Poll until Delivered (or Escalated, which would be a test failure)
-        String finalStatus = pollUntilTerminal(caseId, headers, Duration.ofSeconds(60));
+        // 5. Poll until Delivered (or Escalated, which would be a test failure). 13 async persona
+        //    steps now run (full suite), so allow a wider window than the Phase 1 three-step pipeline.
+        String finalStatus = pollUntilTerminal(caseId, headers, Duration.ofSeconds(120));
         assertEquals("Delivered", finalStatus, "case should reach Delivered, not escalate, with the stub gateway");
 
         // 6. Package + verify
@@ -205,12 +203,26 @@ class SubmitToDeliverIT {
         assertEquals(200, verifyResp.getStatusCode().value());
         assertTrue((Boolean) verifyResp.getBody().get("manifestHashValid"));
 
-        // 7. Replay-audit (US2, SC-002): every AI output reconstructs byte-identically from snapshots.
+        // 6b. SC-002: the delivered package covers EVERY persona in the canonical Initiation suite —
+        //     each contributes a validated artifact, none silently skipped.
+        java.util.Set<String> expectedPersonas = java.util.Set.of(
+                "intake-analyst", "business-analyst", "product-functional-analyst", "solution-architect",
+                "api-designer", "security-architect", "ux-architect", "data-architect",
+                "infrastructure-engineer", "qa-test-strategist", "risk-governance-officer",
+                "delivery-planner", "technical-writer");
+        java.util.Set<String> actualPersonas = artifactTypesFor(caseId);
+        java.util.Set<String> missing = new java.util.TreeSet<>(expectedPersonas);
+        missing.removeAll(actualPersonas);
+        assertTrue(missing.isEmpty(),
+                () -> "package must cover all 13 personas (SC-002); missing=" + missing
+                        + " actual=" + new java.util.TreeSet<>(actualPersonas));
+
+        // 7. Replay-audit (SC-008): every AI output reconstructs byte-identically from snapshots.
         ResponseEntity<Map> replayResp = rest.exchange(
                 url("/api/v1/cases/" + caseId + "/replay"), HttpMethod.POST, new HttpEntity<>(headers), Map.class);
         assertEquals(200, replayResp.getStatusCode().value());
         int total = (Integer) replayResp.getBody().get("totalOperations");
-        assertTrue(total >= 3, "expected >=3 operation executions, got " + total);
+        assertTrue(total >= 13, "expected >=13 operation executions (full suite), got " + total);
         assertEquals(total, replayResp.getBody().get("matched"), "all operations must reconstruct byte-identically");
         assertEquals(0, replayResp.getBody().get("mismatched"));
 
@@ -258,6 +270,24 @@ class SubmitToDeliverIT {
             sb.append("diagnostics query failed: ").append(e.getMessage());
         }
         return sb.toString();
+    }
+
+    /** Distinct artifact types (= persona keys, post-T018) in the delivered package for a case. */
+    private java.util.Set<String> artifactTypesFor(String caseId) throws Exception {
+        java.util.Set<String> types = new java.util.HashSet<>();
+        try (Connection conn = dataSource.getConnection()) {
+            try (PreparedStatement setCtx = conn.prepareStatement("SET app.workspace_id = '" + WORKSPACE_ID + "'")) {
+                setCtx.execute();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT DISTINCT artifact_type FROM artifact WHERE case_instance_id = ?")) {
+                ps.setObject(1, UUID.fromString(caseId));
+                try (var rs = ps.executeQuery()) {
+                    while (rs.next()) types.add(rs.getString(1));
+                }
+            }
+        }
+        return types;
     }
 
     private String scalar(Connection conn, String sql) {

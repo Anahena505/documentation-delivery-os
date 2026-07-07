@@ -2,8 +2,17 @@ dependencies {
     implementation project(':tenancy')
     implementation project(':casecore')
     implementation project(':persona')
+    implementation project(':artifacts')   // ObjectStoreClient — raw attachment bytes to object storage (T040)
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.flowable:flowable-spring-boot-starter-dmn'
+
+    // Attachment text extraction (T042, research R9). AutoDetectParser (tika-core) + the standard
+    // parser package (PDF/Office/etc. format handlers) run behind SandboxedExtractor's containment
+    // bounds (hard timeout, output/memory cap, full crash containment). See SandboxedExtractor's
+    // isolation note: ForkParser (a child JVM) was not adopted — its Serializable-handler requirement
+    // and JDK 9+ classpath propagation make it fail for every file in this runtime.
+    implementation 'org.apache.tika:tika-core:2.9.2'
+    implementation 'org.apache.tika:tika-parsers-standard-package:2.9.2'
 }

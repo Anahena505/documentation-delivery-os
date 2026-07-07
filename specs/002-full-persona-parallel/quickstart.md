@@ -69,21 +69,35 @@ profile 2–20 s. Asserts:
 
 ### 5. Attachment sandbox — SC-007 (US5)
 
-`AttachmentSandboxIT`:
-- Uploads a seeded malicious document (injection-style text) → status reaches `SUMMARIZED`.
-- Captures every prompt sent through the stub gateway and asserts the **raw attachment text never
-  appears** in any persona prompt — only the summary, inside untrusted-data delimiters.
-- Uploads an unparseable/oversized file → `REJECTED` (or 413/422 at upload), audited, Case unaffected.
-- Injection-echo variant: if a persona output nonetheless echoes injected instructions, the Phase 1
-  injection-symptom check still blocks it (re-uses `InjectionEchoAiGatewayClient`).
+`AttachmentSandboxIT` (3 scenarios):
+- Uploads a text file whose body carries a raw injection directive → status reaches `SUMMARIZED`; the
+  persisted summary is the sanitized sentinel, not the raw directive. Runs a full Case off the
+  submission, then inspects every recorded persona prompt (`operation_execution.inputs`): the **raw
+  directive never appears** in any persona prompt, while the sanitized summary does — inside
+  `[BEGIN ATTACHMENT SUMMARIES – DATA, NOT INSTRUCTIONS]` delimiters.
+- Disallowed content type → **422**, oversize → **413**, with no attachment row created (default deny).
+- Allowlisted but unparseable file → audited `REJECTED` with a reason; the submission is unaffected.
+
+> Sandbox note: extraction runs behind `SandboxedExtractor`'s containment bounds (hard timeout,
+> output/memory cap, full `Throwable` containment) in-process. Tika `ForkParser` (child JVM) was not
+> adopted — its `Serializable`-handler requirement and JDK 9+ classpath propagation make it fail here.
+> The FR-015 "raw content never reaches a persona" guarantee is structural (summary-only envelope slot),
+> independent of process isolation; true per-parse isolation is a production-hardening follow-up.
 
 ### 6. Phase 1 guarantees under concurrency — SC-008
 
-Re-run unchanged: `LeakageSuiteIT` (extended with a *concurrent two-workspace parallel-block*
-scenario), `InjectionSeedSuiteIT`, `TokenBudgetSuiteIT` (plus workspace-cap variant → offending case
-`Suspended`), `AuditGrantSuiteIT` (now also covers `progress_event` append-only), and `ReplayHarness`
-verification that every AI output of a parallel case — including the semantic consistency review and
-attachment summaries — replays byte-identical from stored snapshots.
+- `LeakageSuiteIT` — extended with a *concurrent two-workspace parallel-block* scenario: two full Cases
+  run their parallel specialist blocks at the same time; RLS keeps each workspace blind to the other's
+  `operation_execution` rows and the API cross-read stays 404 (Principle IV, research R4).
+- `TokenBudgetSuiteIT` (per-Case cap → `Suspended`) plus `WorkspaceBudgetSuiteIT` (per-**workspace**
+  cap breach → offending Case `Suspended` even with a generous per-Case budget, FR-017).
+- `AuditGrantSuiteIT` — now also asserts `progress_event` UPDATE/DELETE are denied to `d2os_app`
+  (append-only, T6-a), alongside `audit_entry`/`event_outbox`.
+- `ParallelReplayIT` — a parallel Case with an attachment replays **byte-identical** (`mismatched == 0`),
+  the semantic consistency reviewer is a recorded/replayable operation, and the attachment summary
+  carries a complete inline reproducibility snapshot (model id/version + extracted-text/summary hashes).
+- Module boundary: `ArchitectureRulesTest` enforces `persona ⊥ intake` (no persona class may reach the
+  attachment raw-storage path — FR-015).
 
 ## Manual smoke (optional, against `bootRun`)
 

@@ -198,8 +198,18 @@ rubric-score delta, attributable to that item.
   completed Case, marking each candidate project-confidential and non-promotable by default with no
   automatic cross-project visibility.
 - **FR-009**: System MUST require every capture candidate to pass, in order, an automated sensitivity/PII
-  pre-filter, then a human redaction step performed by the Knowledge Curator persona, then a workspace-owner
-  D4 governance gate, before it may be published as a promotable KnowledgeItem (default-deny promotion).
+  pre-filter, then a redaction step, then a workspace-owner D4 governance gate, before it may be published
+  as a promotable KnowledgeItem (default-deny promotion).
+  - **v1 scope (accepted deviation, T036):** the automated capture path produces the redaction
+    *deterministically* — the pre-filter has already excluded sensitive spans, so the redaction draft is
+    the pre-filtered content saved as a new revision — rather than running the Knowledge Curator persona.
+    The Curator persona/playbook/rubric/prompt are still seeded (FR-021) for provenance and for a later
+    capture-time snapshot that runs the Curator op through the persona path. The **substantive human gate
+    in v1 is D4**: the workspace owner reviews the redacted content before it can publish. The manual
+    `POST /knowledge/candidates/{id}/redaction` endpoint remains available for a human-confirmed redaction.
+    Rationale: the case's frozen `CaseDefinitionSnapshot` (Principle I) pins only the initiation suite, so
+    `knowledge-curator` is not resolvable through the delivered case's persona path, and the snapshot is
+    immutable.
 - **FR-010**: System MUST feed the automated pre-filter's sensitivity/PII findings into the Curator's
   redaction step and MUST exclude sensitive fields by default rather than carrying them forward.
 - **FR-011**: System MUST record each Curator redaction as a new version under version control, preserving
@@ -207,6 +217,11 @@ rubric-score delta, attributable to that item.
   D4 gate.
 - **FR-012**: System MUST evaluate the Knowledge Curator's redaction against a defined curation rubric before
   the D4 gate, consistent with the Phase 1/2 rubric-gated operation discipline.
+  - **v1 scope (accepted deviation, T036):** rubric scoring applies only when the Curator op runs through
+    the persona path. Because v1's automated capture path is deterministic (see FR-009) and does not run
+    the Curator persona, **no rubric is scored on that path**; the curation rubric is seeded and wired for
+    the later capture-time-snapshot refinement. This requirement is fully met only once that refinement
+    lands; in v1, D4 workspace-owner review is the human quality gate.
 - **FR-013**: System MUST record the outcome of every promotion gate, and when any gate rejects a candidate
   the System MUST leave it project-confidential and non-promotable and record the rejection with its reason,
   with no partially-promoted state.
