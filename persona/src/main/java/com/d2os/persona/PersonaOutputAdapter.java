@@ -31,7 +31,11 @@ public class PersonaOutputAdapter implements PersonaOutputPort {
             if (attempts.isEmpty()) continue;
 
             OperationExecution finalAttempt = attempts.get(attempts.size() - 1);
-            String personaKey = "persona-" + invocation.getSequenceNo();
+            // Prefer the real persona key (T018); fall back to the Phase 1 positional label only for
+            // legacy rows written before persona_key existed, so old cases still assemble.
+            String personaKey = invocation.getPersonaKey() != null
+                    ? invocation.getPersonaKey()
+                    : "persona-" + invocation.getSequenceNo();
             outputs.add(new ValidatedOutput(
                     personaKey, finalAttempt.getId(), finalAttempt.getOutputRef(), finalAttempt.getOutputHash()));
         }

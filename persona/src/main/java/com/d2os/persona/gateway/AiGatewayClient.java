@@ -7,4 +7,11 @@ package com.d2os.persona.gateway;
  */
 public interface AiGatewayClient {
     AiCallResult call(AiCallRequest request);
+
+    /**
+     * Embed text into a vector for KnowledgeItem indexing/retrieval (T007, Phase 3, research R3).
+     * Provider-agnostic like {@link #call}; the model identity/version is returned for the item snapshot
+     * (Principle II). Integration tests use the deterministic StubAiGatewayClient override, not a provider.
+     */
+    EmbedResult embed(EmbedRequest request);
 }

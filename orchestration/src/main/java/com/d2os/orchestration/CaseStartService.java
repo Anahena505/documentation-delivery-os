@@ -21,7 +21,10 @@ import java.util.UUID;
 @Service
 public class CaseStartService {
 
-    private static final String PROCESS_KEY = "initiation";
+    // Phase 2: new Cases run the full-suite canonical workflow (initiation-v2). The Phase 1
+    // "initiation" process stays deployed only so already-pinned v1 Cases remain replayable (Principle I).
+    // Single case type in v1/v2, so the key is a constant; snapshot-driven resolution is a later refinement.
+    private static final String PROCESS_KEY = "initiation-v2";
 
     private final CaseService caseService;
     private final RuntimeService runtimeService;

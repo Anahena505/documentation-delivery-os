@@ -1,5 +1,6 @@
 dependencies {
     implementation project(':catalog')
+    implementation project(':tenancy')
     implementation project(':casecore')
     implementation project(':artifacts')
     implementation project(':observability')

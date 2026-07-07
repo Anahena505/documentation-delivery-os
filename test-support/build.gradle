@@ -5,4 +5,8 @@ dependencies {
     api 'org.testcontainers:postgresql:1.20.3'
     api 'org.testcontainers:minio:1.20.3'
     api 'com.tngtech.archunit:archunit-junit5:1.3.0'
+    // Phase 2 T051: ArchitectureRules' statelessness rule matches on @Component/@Service — pulled in as
+    // a lightweight, autoconfiguration-free dependency (version resolved via the root project's Spring
+    // BOM import, applied to every subproject including this one).
+    api 'org.springframework:spring-context'
 }

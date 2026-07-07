@@ -16,6 +16,12 @@ public final class ContainerFixtures {
                     .withDatabaseName("d2os")
                     .withUsername("d2os")
                     .withPassword("d2os")
+                    // Spring's test framework caches one ApplicationContext per IT class (each class's
+                    // @DynamicPropertySource makes its context key unique), and every cached context holds
+                    // its Hikari pool (default 10) open for the whole JVM. 17+ suites × 10 connections blew
+                    // past Postgres's default max_connections=100 mid-run, cascading "Failed to load
+                    // ApplicationContext" into every later suite. 400 gives the full board headroom.
+                    .withCommand("postgres", "-c", "max_connections=400")
                     .withReuse(true);
 
     public static final MinIOContainer MINIO =

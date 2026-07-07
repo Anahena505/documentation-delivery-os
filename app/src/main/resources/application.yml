@@ -28,6 +28,12 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  # Let our own default-deny cap (d2os.intake.attachment.max-size-bytes, 20 MiB) govern uploads rather
+  # than the servlet container's 1 MiB default, so oversize files reach our handler and get a proper 413.
+  servlet:
+    multipart:
+      max-file-size: ${D2OS_ATTACHMENT_MAX_BYTES:20971520}
+      max-request-size: 25MB
 
 # Flowable embedded engine (R1) — async executor on so wait-states survive restart (NFR-4).
 # database-schema-update=true lets Flowable auto-manage its OWN internal ACT_*/FLW_* engine
@@ -36,6 +42,16 @@ spring:
 flowable:
   database-schema-update: true
   async-executor-activate: true
+  # Bounded worker pool for concurrent async jobs (research R2, FR-003). The four parallel-block
+  # specialists run as independent jobs from this pool; excess jobs queue in Flowable's persisted
+  # job table (nothing dropped). Sized to satisfy NFR-1 without exhausting DB connections.
+  process:
+    async-executor:
+      default-async-job-acquire-wait-time: 1s
+      max-async-jobs-due-per-acquisition: 16
+      core-pool-size: 8
+      max-pool-size: 16
+      queue-capacity: 256
 
 d2os:
   ai-gateway:
@@ -43,9 +59,53 @@ d2os:
     provider: ${D2OS_AI_PROVIDER:anthropic}
     model: ${D2OS_AI_MODEL:claude-sonnet-5}
     api-key: ${D2OS_AI_API_KEY:}
+    # Caps simultaneous provider calls independently of the engine worker pool (research R2, FR-003)
+    # so tuning concurrency does not blow the provider rate limit.
+    max-concurrent-calls: ${D2OS_AI_MAX_CONCURRENT:8}
+    # Embeddings model for KnowledgeItem indexing/retrieval (Phase 3, research R3). Provider-agnostic
+    # (AS-5) and env-driven; model identity/version is recorded per embed call (Principle II).
+    # Integration tests never call this — StubAiGatewayClient (T003) returns deterministic vectors.
+    # Default text-embedding-3-small supports exact reduction to embed-dimensions via the provider's
+    # `dimensions` field, so it fits the VECTOR(384) column out of the box.
+    embed-model: ${D2OS_AI_EMBED_MODEL:text-embedding-3-small}
+    # Embedding output dimensionality. MUST equal the knowledge_item.embedding VECTOR(n) column (V13)
+    # and the chosen embed-model's output dimension. Requested from the provider AND enforced on the
+    # response — a mismatch throws EmbeddingDimensionException at the gateway rather than failing
+    # cryptically at Postgres insert/query time. Changing this requires a matching DB migration.
+    embed-dimensions: ${D2OS_AI_EMBED_DIMENSIONS:384}
+  # Knowledge layer (Phase 3). Retrieval is bounded so injected knowledge cannot grow prompts
+  # without limit (NFR-7) or add user-visible latency (research R10).
+  knowledge:
+    # Max KnowledgeItems injected into one persona operation (research R10, FR-002).
+    max-items-per-operation: ${D2OS_KNOWLEDGE_MAX_ITEMS:5}
+    # Retrieval latency budget, p95, measured by KnowledgeRetrievalIT (research R10).
+    retrieval-budget-ms: ${D2OS_KNOWLEDGE_RETRIEVAL_BUDGET_MS:500}
+    # Per-item token ceiling before an item is truncated/skipped at envelope insertion; injected
+    # tokens are counted against the per-case budget by TokenBudgetGuard (research R10, NFR-7).
+    per-item-token-ceiling: ${D2OS_KNOWLEDGE_PER_ITEM_TOKEN_CEILING:1024}
   validation:
     rubric-pass-threshold: 0.80   # weighted ≥80% AND no critical fail (FR-005)
     max-generations: 3            # original + 2 revises, then escalate (FR-005)
+  orchestration:
+    # Dual-state reconciliation sweep interval in ms (FR-010, research R8): engine history vs domain
+    # Case state, keyed by Case id. Plain milliseconds so @Scheduled parses it unambiguously.
+    reconciliation-interval-ms: ${D2OS_RECONCILIATION_INTERVAL_MS:60000}
+  casecore:
+    progress:
+      # HEARTBEAT cadence (ms) for Running cases so a long AI call never looks frozen (FR-011, ≤5s).
+      # Plain milliseconds so @Scheduled parses it unambiguously.
+      heartbeat-interval-ms: ${D2OS_PROGRESS_HEARTBEAT_MS:4000}
+  intake:
+    attachment:
+      # Default-deny upload surface (Principle V, T1-d): only allowlisted types, size-capped.
+      max-size-bytes: ${D2OS_ATTACHMENT_MAX_BYTES:20971520}   # 20 MiB
+      allowlist: >-
+        application/pdf,
+        application/vnd.openxmlformats-officedocument.wordprocessingml.document,
+        application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,
+        application/vnd.openxmlformats-officedocument.presentationml.presentation,
+        text/plain, text/markdown, text/csv
+      extraction-timeout: ${D2OS_ATTACHMENT_EXTRACTION_TIMEOUT:60s}
   storage:
     endpoint: ${D2OS_STORAGE_ENDPOINT:http://localhost:9000}
     bucket: ${D2OS_STORAGE_BUCKET:d2os-artifacts}

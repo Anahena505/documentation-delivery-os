@@ -10,6 +10,7 @@ dependencies {
     implementation project(':artifacts')
     implementation project(':observability')
     implementation project(':replay')
+    implementation project(':knowledge')
 
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
@@ -23,4 +24,24 @@ dependencies {
     testImplementation project(':test-support')
     testImplementation platform('software.amazon.awssdk:bom:2.28.29')
     testImplementation 'software.amazon.awssdk:s3'
+}
+
+// The default test task excludes the load posture suite (T039) — it drives 50+ concurrent cases and
+// is slow. Run it explicitly with `gradle :app:loadTest`.
+tasks.named('test') {
+    useJUnitPlatform {
+        excludeTags 'load'
+    }
+}
+
+tasks.register('loadTest', Test) {
+    description = 'Runs the load-posture suite only (JUnit tag "load"). Excluded from `test`.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'load'
+    }
+    // Never cache a load result — it is timing-sensitive and environment-dependent.
+    outputs.upToDateWhen { false }
 }

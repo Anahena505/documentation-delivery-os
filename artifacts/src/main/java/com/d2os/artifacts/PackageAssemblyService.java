@@ -2,6 +2,7 @@ package com.d2os.artifacts;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,19 +23,33 @@ public class PackageAssemblyService {
     private final ArtifactRevisionRepository revisionRepository;
     private final ExecutionPackageRepository packageRepository;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbcTemplate;
 
     public PackageAssemblyService(ArtifactRepository artifactRepository,
                                   ArtifactRevisionRepository revisionRepository,
                                   ExecutionPackageRepository packageRepository,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  JdbcTemplate jdbcTemplate) {
         this.artifactRepository = artifactRepository;
         this.revisionRepository = revisionRepository;
         this.packageRepository = packageRepository;
         this.objectMapper = objectMapper;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
     public ExecutionPackage assemble(UUID workspaceId, UUID caseId) {
+        // Defense in depth (US3, T032, FR-007): never assemble a package while an unresolved
+        // deterministic cross-artifact contradiction exists — the consistency-check subprocess should
+        // already have blocked such a case, this guarantees it even if the flow is ever changed.
+        Long openDeterministic = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM consistency_finding WHERE case_id = ? "
+                        + "AND tier = 'DETERMINISTIC' AND status = 'OPEN'", Long.class, caseId);
+        if (openDeterministic != null && openDeterministic > 0) {
+            throw new IllegalStateException(
+                    "cannot assemble package: " + openDeterministic + " open deterministic consistency finding(s)");
+        }
+
         List<Artifact> artifacts = artifactRepository.findByCaseInstanceId(caseId);
         List<Map<String, String>> manifestEntries = new ArrayList<>();
         StringBuilder hashConcat = new StringBuilder();

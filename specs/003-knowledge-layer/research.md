@@ -104,18 +104,32 @@ only item ids without versions — rejected (FR-006/AD-1: `(id, version)`, never
 ## R6. Case-end capture trigger and process shape
 
 **Decision**: A standalone **`knowledge-capture` BPMN process**, started by
-`CaseDeliveredKnowledgeTrigger` — an outbox-event consumer that reacts to the Case reaching
-`Delivered` — correlated by `caseInstanceId`. Process shape: capture service task (harvest
-candidates from the case's artifacts/decisions) → deterministic pre-filter service task → Curator
-persona service task (redaction draft, rubric-validated, reusing the `PersonaStepDelegate`
-execution path) → **D4 user task** (workspace owner approve/reject) → publish or reject service
-task. Escalation/wait semantics reuse Phase 2's `EscalationBridge` pattern.
+`CaseDeliveredKnowledgeTrigger` when the Case reaches `Delivered`, correlated by `caseInstanceId`.
+Process shape: capture service task (harvest candidates from the case's artifacts/decisions) →
+deterministic pre-filter service task → Curator redaction service task → **D4 review** (workspace
+owner approve/reject) → publish or reject. Escalation/wait semantics reuse Phase 2's
+`EscalationBridge`/receiveTask pattern.
+
+> **Accepted deviations (v1, see tasks.md T035/T036):**
+> - **Trigger mechanism:** `CaseDeliveredKnowledgeTrigger` is a `@Scheduled` sweep over Flowable's
+>   non-RLS history for finished `initiation-v2` instances, **not** an outbox-event relay —
+>   `event_outbox` is RLS-scoped + append-only (`REVOKE UPDATE/DELETE`), so a "flip published_at"
+>   relay is structurally impossible. Idempotent by case business key; mirrors `ReconciliationJob`.
+>   Consequence to note: because it is keyed to `initiation-v2`, Phase 4 case types do **not** get
+>   capture for free by this mechanism — the sweep (or a generalized successor) must be extended per
+>   delivering process, and capture latency equals the sweep interval.
+> - **Curator step:** produced **deterministically** (the pre-filter already excluded PII), not via
+>   the persona path — the delivered case's frozen `CaseDefinitionSnapshot` pins only the initiation
+>   suite, so `knowledge-curator` is not resolvable there and the snapshot is immutable (Principle I).
+>   No curation rubric is scored on this path; the substantive human gate in v1 is D4. The persona/
+>   playbook/rubric/prompt are seeded for provenance and a later capture-time snapshot.
+> - **D4:** modeled as a `receiveTask` wait released by the `POST .../d4` endpoint (which is the
+>   authoritative publisher), not a Flowable user task.
 
 **Rationale**: A standalone process keeps the initiation workflow definition untouched — running
-and pinned cases are unaffected (Principle I), and Phase 4's new case types get capture for free
-by emitting the same `Delivered` event, instead of every case-type workflow embedding a
-callActivity. The D4 gate is a plain Flowable user task + Decision row in v1 — the first-class
-Review/Approval-Gate subprocess is explicitly Phase 5; building it early would duplicate E5.1.
+and pinned cases are unaffected (Principle I). The D4 gate stays a lightweight in-process wait +
+Decision row in v1 — the first-class Review/Approval-Gate subprocess is explicitly Phase 5;
+building it early would duplicate E5.1.
 
 **Alternatives considered**: callActivity appended to initiation-v3 — rejected (requires a new
 workflow version per case type per Phase, couples capture to authoring workflows, no benefit);
@@ -145,12 +159,18 @@ scale).
 ## R8. Deprecation flagging mechanics
 
 **Decision**: `DeprecationService.deprecate(itemKey, version-range, reason)` — in one
-transaction: set item status `DEPRECATED` (audited governance action + Decision row), and insert
-one `knowledge_affected_execution` row per distinct `operation_execution` whose injection snapshot
-references a deprecated version (derived by a single insert-select over
+transaction: set item status `DEPRECATED` (audited governance action recorded as an **AuditEntry**),
+and insert one `knowledge_affected_execution` row per distinct `operation_execution` whose injection
+snapshot references a deprecated version (derived by a single insert-select over
 `knowledge_injection_snapshot`). Flags are their own append-only rows; snapshots and outputs are
 never touched. New retrievals exclude `DEPRECATED` items by status predicate; in-flight envelopes
 already built keep their snapshotted versions.
+
+> **Accepted deviation (v1, tasks.md T040):** the governance record is an immutable **`AuditEntry`**,
+> not a `decision` row. The V4 `decision` table is `NOT NULL case_instance_id` and CHECK-constrains
+> `decision_type` to the case D-gates (D1–D4); a knowledge-item deprecation is bound to no single
+> case and is not a D-gate, so the `audit_entry` stream is the correct system-of-record vehicle for
+> FR-016. (Item byte-immutability across a status flip is additionally enforced by the V16 trigger.)
 
 **Rationale**: FR-014/015/016 verbatim — discoverability requires a queryable flag artifact (an
 operator lists affected executions per SC-007), and materializing flags at deprecation time makes
@@ -165,19 +185,26 @@ append-only side table is cleaner and RLS-scoped the same way).
 ## R9. Knowledge-influence KPI (E3.4)
 
 **Decision**: `InfluenceEvaluationService` runs an explicit, on-demand **paired evaluation**: for a
-target (item, operation definition, fixed input set), execute the operation twice through the
-normal persona execution path — once with the item force-included, once with it force-excluded —
-score both outputs against the same RubricDefinition version, and emit
+target (item, **a case + persona step**, fixed input set), execute the operation twice — once with
+the item force-included, once with it force-excluded — score both outputs against the same
+RubricDefinition version, and emit
 `kpi_sample(metric='knowledge_influence', value = score_with − score_without)` tagged with the
-item id/version. Both runs record full OperationExecution snapshots (they are real, replayable
+item key/version. Both runs record full OperationExecution snapshots (they are real, replayable
 executions, flagged `evaluation=true` so they never feed delivery). Items never injected anywhere
 report `not-yet-measurable` (no sample emitted, API returns the state explicitly).
 
+> **Accepted deviations (v1, tasks.md T046/T047):**
+> - **Evaluation target** is `{caseId, personaKey}`, **not** a bare operation-definition key: a
+>   rubric version resolves only through a case's pinned `CaseDefinitionSnapshot` (Principle I), so
+>   a bare operation key cannot supply the scoring rubric. `contracts/api.yaml` was updated to match;
+>   the run is synchronous (deterministic stub gateway) and returns the `InfluenceResult` with a 202.
+> - **KPI schema**: the V9 `kpi_sample.metric` CHECK forbids new metric names, so V15 widens that
+>   CHECK to include `knowledge_influence` and adds a `dimensions JSONB` column (with a partial index
+>   on `key`/`version`). This is the minimal reconciliation of the "no new observability schema" goal.
+
 **Rationale**: The spec defines the metric as a with/without rubric delta (Clarifications); the
 only honest way to produce it is actually running both arms under identical inputs and rubric
-version. Reusing the persona execution path means the evaluation inherits snapshots, budget
-enforcement, and audit for free. Emitting through the existing `kpi_sample` stream (V9) needs no
-new observability schema.
+version. The evaluation still records snapshots, inherits budget enforcement, and audits each run.
 
 **Alternatives considered**: observational estimation from historical runs (compare cases that
 happened to use the item vs. not) — rejected (confounded, not attributable per item, spec asks for

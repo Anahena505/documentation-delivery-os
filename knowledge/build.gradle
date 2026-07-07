@@ -1,0 +1,15 @@
+// Knowledge bounded context (Phase 3, 11th module — plan.md Project Structure, research R1).
+// Depends on tenancy (workspace/RLS), catalog (Curator definitions), casecore (case/decision/audit),
+// and persona ONLY for its KnowledgeProvider SPI + gateway embed op. persona MUST NOT depend back on
+// knowledge — the dependency is one-way (acyclic), enforced by ArchitectureRules (T039).
+dependencies {
+    implementation project(':tenancy')
+    implementation project(':catalog')
+    implementation project(':casecore')
+    implementation project(':persona')
+    // US4 only: emit the knowledge_influence KPI through observability's KpiEmitter. observability does
+    // NOT depend back on knowledge, so the graph stays acyclic (enforced by ArchitectureRules, T039).
+    implementation project(':observability')
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+}

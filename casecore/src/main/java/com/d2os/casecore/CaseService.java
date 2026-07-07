@@ -1,5 +1,8 @@
 package com.d2os.casecore;
 
+import com.d2os.casecore.progress.ActiveCaseRegistry;
+import com.d2os.casecore.progress.ProgressEmitter;
+import com.d2os.casecore.progress.ProgressEvent;
 import com.d2os.casecore.spi.SubmissionLookup;
 import com.d2os.catalog.DefinitionRef;
 import com.d2os.catalog.DefinitionResolutionService;
@@ -36,6 +39,8 @@ public class CaseService {
     private final DefinitionResolutionService definitionResolution;
     private final AuditWriter auditWriter;
     private final ObjectMapper objectMapper;
+    private final ProgressEmitter progressEmitter;
+    private final ActiveCaseRegistry activeCaseRegistry;
     private final long defaultTokenBudget;
 
     public CaseService(CaseInstanceRepository caseRepository,
@@ -44,6 +49,8 @@ public class CaseService {
                        DefinitionResolutionService definitionResolution,
                        AuditWriter auditWriter,
                        ObjectMapper objectMapper,
+                       ProgressEmitter progressEmitter,
+                       ActiveCaseRegistry activeCaseRegistry,
                        @Value("${d2os.case.default-token-budget:1000000}") long defaultTokenBudget) {
         this.caseRepository = caseRepository;
         this.snapshotRepository = snapshotRepository;
@@ -51,6 +58,8 @@ public class CaseService {
         this.definitionResolution = definitionResolution;
         this.auditWriter = auditWriter;
         this.objectMapper = objectMapper;
+        this.progressEmitter = progressEmitter;
+        this.activeCaseRegistry = activeCaseRegistry;
         this.defaultTokenBudget = defaultTokenBudget;
     }
 
@@ -116,6 +125,8 @@ public class CaseService {
         caseRepository.save(kase);
         auditWriter.record(kase.getWorkspaceId(), "case_instance", caseId, "Suspended", "system",
                 Map.of("reason", reason));
+        progressEmitter.emit(kase.getWorkspaceId(), caseId, ProgressEvent.Kind.SUSPENDED);
+        activeCaseRegistry.clear(caseId);   // parked — not executing, no heartbeat
         return kase;
     }
 
@@ -149,6 +160,17 @@ public class CaseService {
         kase.transitionTo(target);
         caseRepository.save(kase);
         auditWriter.record(kase.getWorkspaceId(), "case_instance", caseId, target.name(), actor, details);
+        if (target == CaseStatus.Escalated) {
+            progressEmitter.emit(kase.getWorkspaceId(), caseId, ProgressEvent.Kind.ESCALATED);
+        } else if (target == CaseStatus.Delivered) {
+            progressEmitter.emit(kase.getWorkspaceId(), caseId, ProgressEvent.Kind.DELIVERED);
+        }
+        // A Case emits heartbeats exactly while it is executing (Running); any other state parks it.
+        if (target == CaseStatus.Running) {
+            activeCaseRegistry.markRunning(caseId, kase.getWorkspaceId());
+        } else {
+            activeCaseRegistry.clear(caseId);
+        }
         return kase;
     }
 
