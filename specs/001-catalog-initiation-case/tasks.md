@@ -162,6 +162,16 @@ Modular monolith: `src/<bounded-context>/`, catalog content in `catalog/`, tests
 
 ---
 
+## Phase 9: Tracked Follow-ups (deferred during Phase 1 implementation)
+
+**Purpose**: Substance deferred by tasks that were closed structurally — tracked here so the deferrals are explicit debt, not silently absorbed. None block later phases; schedule opportunistically.
+
+- [ ] T065 Author the real catalog content deferred by T020: the 7 revised v0 template definitions, 2 greenfield templates, and 3 playbooks (spec Assumptions; plan `catalog/` tree) seeded via `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` — T020 shipped structural seed definitions only
+- [ ] T066 Replace T033's length/structure heuristic with the weighted quality-rubric scorer FR-005 specifies (AI-judge or equivalent measurable rubric scoring) in `persona/src/main/java/com/d2os/persona/` — the heuristic satisfies the pipeline shape, not FR-005's substance
+- [ ] T067 Replace the v1 header-based workspace context (T010's documented stopgap) with authenticated JWT-claim workspace resolution — the current header is an unauthenticated trust mechanism acceptable only for local/dev; production requires authN before workspace scoping (Principle IV)
+
+---
+
 ## Dependencies & Execution Order
 
 - **Phase 1 (Setup)** → **Phase 2 (Foundational)**: strictly sequential; Phase 2 blocks all user stories.

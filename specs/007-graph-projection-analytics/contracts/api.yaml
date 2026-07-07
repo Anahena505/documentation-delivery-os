@@ -1,0 +1,239 @@
+openapi: 3.1.0
+info:
+  title: D2OS Phase 7 — Graph Projection + Analytics API (delta)
+  version: 0.7.0
+  description: >
+    Delta contract over the Phase 1–6 APIs. Prior endpoints unchanged. New surfaces: workspace-
+    scoped traceability queries (TRACES_TO / DEPENDS_ON, multi-hop), graph administration
+    (rebuild, equivalence status, projection gaps), dependency-cycle findings, and the
+    knowledge-influence dashboard data. The graph is a derived read model — nothing here writes
+    domain state; admin operations act only on the projection.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: traceability
+  - name: graph-admin
+  - name: cycles
+  - name: influence
+
+paths:
+  /graph/traceability:
+    get:
+      tags: [traceability]
+      summary: Multi-hop TRACES_TO / DEPENDS_ON lineage from a starting node (FR-005/006, US2)
+      operationId: queryTraceability
+      parameters:
+        - name: nodeType
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [CASE, SUBMISSION, ARTIFACT_REVISION, PACKAGE, DEFINITION_VERSION,
+                   KNOWLEDGE_ITEM_VERSION, OPERATION_EXECUTION, GATE, FEATURE, PROJECT]
+        - { name: naturalKey, in: query, required: true, schema: { type: string } }
+        - name: relation
+          in: query
+          required: true
+          schema: { type: string, enum: [TRACES_TO, DEPENDS_ON] }
+        - name: direction
+          in: query
+          schema: { type: string, enum: [UPSTREAM, DOWNSTREAM, BOTH], default: DOWNSTREAM }
+        - { name: maxDepth, in: query, schema: { type: integer, default: 10 } }
+        - { name: pageToken, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: >
+            Lineage paths with per-hop provenance; paginates past the node budget (default 500)
+            — predictable degradation, never a silent timeout (FR-013). Workspace-scoped only
+            (FR-007).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineageResult' }
+        '404': { description: Starting node not found in this workspace's live graph }
+
+  /graph/nodes/{nodeId}:
+    get:
+      tags: [traceability]
+      summary: Inspect one node — attributes, provenance, adjacent edges (US2 navigability)
+      operationId: getGraphNode
+      parameters:
+        - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Node with source provenance (FR-003) and links back to owning API resources
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphNode' }
+
+  /graph/admin/rebuild:
+    post:
+      tags: [graph-admin]
+      summary: Rebuild the graph from scratch — verify-then-flip (FR-002, US1)
+      description: >
+        Builds generation N+1 by full replay of the outbox + edge tables, runs the
+        rebuild-equivalence check against relational truth, and flips the live generation only
+        on PASS. On FAIL the prior generation stays live and the divergence is reported — a
+        divergent rebuild is never served. Reads during rebuild serve the last consistent
+        generation (FR-015).
+      operationId: rebuildGraph
+      responses:
+        '202': { description: Rebuild started (async; result via /graph/admin/status) }
+        '409': { description: A rebuild is already in progress }
+
+  /graph/admin/status:
+    get:
+      tags: [graph-admin]
+      summary: Projection health — live generation, watermark lag, last equivalence result
+      operationId: getGraphStatus
+      responses:
+        '200':
+          description: Current projection state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectionStatus' }
+
+  /graph/admin/gaps:
+    get:
+      tags: [graph-admin]
+      summary: Projection-sufficiency findings — thin events caught, not silently skipped (FR-011)
+      operationId: listProjectionGaps
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, RESOLVED] } }
+      responses:
+        '200':
+          description: Insufficient-payload events with the missing fields named
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProjectionGap' }
+
+  /graph/cycles:
+    get:
+      tags: [cycles]
+      summary: Dependency-cycle findings — whole-graph, cross-case (FR-008/009, US3)
+      operationId: listCycles
+      responses:
+        '200':
+          description: >
+            Detected cycles, each naming its member nodes in path order. Empty for an acyclic
+            graph (zero false positives).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CycleFinding' }
+
+  /graph/influence:
+    get:
+      tags: [influence]
+      summary: Knowledge-influence dashboard data on the graph (FR-010, US4)
+      operationId: getInfluenceAnalytics
+      parameters:
+        - { name: knowledgeKey, in: query, schema: { type: string } }
+        - { name: caseId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: >
+            Per KnowledgeItem version: recorded influence readings (from the Phase 3 KPI stream —
+            never recomputed here) plus the operations and artifacts it touched, navigable along
+            INJECTED_INTO / PRODUCED edges. Items with no samples report NOT_YET_MEASURABLE.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InfluenceEntry' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  schemas:
+    GraphNode:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        nodeType: { type: string }
+        naturalKey: { type: string }
+        label: { type: string }
+        attributes: { type: object }
+        sourceKind:
+          type: string
+          enum: [OUTBOX_EVENT, TRACE_LINK, DEPENDENCY, INJECTION_SNAPSHOT]
+        sourceRef: { type: string }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/GraphEdgeRef' }
+    GraphEdgeRef:
+      type: object
+      properties:
+        edgeType: { type: string }
+        direction: { type: string, enum: [IN, OUT] }
+        peerNodeId: { type: string, format: uuid }
+        peerLabel: { type: string }
+        sourceRef: { type: string }
+    LineageResult:
+      type: object
+      properties:
+        root: { $ref: '#/components/schemas/GraphNode' }
+        paths:
+          type: array
+          items:
+            type: array
+            description: One lineage path — ordered hops from the root
+            items:
+              type: object
+              properties:
+                edgeType: { type: string }
+                node: { $ref: '#/components/schemas/GraphNode' }
+                depth: { type: integer }
+        truncated: { type: boolean, description: true when the node budget was hit (paginate) }
+        nextPageToken: { type: string, nullable: true }
+    ProjectionStatus:
+      type: object
+      properties:
+        liveGeneration: { type: integer }
+        rebuildInProgress: { type: boolean }
+        outboxLagSeconds: { type: number }
+        lastEquivalenceCheck: { type: string, format: date-time, nullable: true }
+        lastEquivalenceResult: { type: string, enum: [PASS, FAIL], nullable: true }
+        openGapCount: { type: integer }
+    ProjectionGap:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        eventId: { type: string, format: uuid }
+        eventType: { type: string }
+        missingFields: { type: array, items: { type: string } }
+        detectedAt: { type: string, format: date-time }
+        status: { type: string, enum: [OPEN, RESOLVED] }
+    CycleFinding:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        detectedAt: { type: string, format: date-time }
+        memberNodes:
+          type: array
+          description: Nodes forming the cycle, in path order (may span multiple cases)
+          items: { $ref: '#/components/schemas/GraphNode' }
+    InfluenceEntry:
+      type: object
+      properties:
+        knowledgeKey: { type: string }
+        knowledgeVersion: { type: integer }
+        state: { type: string, enum: [MEASURED, NOT_YET_MEASURABLE] }
+        readings:
+          type: array
+          items:
+            type: object
+            properties:
+              delta: { type: number }
+              operationDefinitionKey: { type: string }
+              recordedAt: { type: string, format: date-time }
+        touchedOperations:
+          type: array
+          items: { $ref: '#/components/schemas/GraphNode' }
+        touchedArtifacts:
+          type: array
+          items: { $ref: '#/components/schemas/GraphNode' }

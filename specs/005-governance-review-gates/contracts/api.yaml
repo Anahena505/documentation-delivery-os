@@ -1,0 +1,390 @@
+openapi: 3.1.0
+info:
+  title: D2OS Phase 5 — Governance & Review Gates API (delta)
+  version: 0.5.0
+  description: >
+    Delta contract over the Phase 1–4 APIs. Prior endpoints unchanged. New surfaces: gate
+    listing/decide (three verbs only — no artifact content is ever accepted from a human for an
+    AI-drafted artifact), reopen candidates + impact assessment + reopen, escalation visibility,
+    audit chain verification, package access grants, and workspace retention config. Also
+    documents the gate lifecycle OUTBOX EVENT payload contract (components/schemas/GateEvent*)
+    that Phase 7's projector consumes. All requests workspace-scoped (RLS beneath).
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: gates
+  - name: reopen
+  - name: escalations
+  - name: audit
+  - name: packages
+  - name: workspace
+
+paths:
+  /gates:
+    get:
+      tags: [gates]
+      summary: List gate instances (reviewer worklist) (US1)
+      operationId: listGates
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, REGENERATING, APPROVED, REJECTED, REOPEN_CANDIDATE, REOPENED]
+        - { name: caseId, in: query, schema: { type: string, format: uuid } }
+        - { name: assignedRole, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Workspace-scoped gates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GateInstance' }
+
+  /gates/{gateId}:
+    get:
+      tags: [gates]
+      summary: Full gate view — artifacts under review + exact decision inputs (FR-002)
+      operationId: getGate
+      parameters: [{ $ref: '#/components/parameters/gateId' }]
+      responses:
+        '200':
+          description: Gate with inputs_ref resolved (artifact revisions, rubric scores, delta report)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GateDetail' }
+
+  /gates/{gateId}/decision:
+    post:
+      tags: [gates]
+      summary: Record the gate decision — APPROVE / REJECT / REQUEST_CHANGES only (FR-002/004, US1/US2)
+      description: >
+        The only human interaction with an AI-drafted artifact. REQUEST_CHANGES requires
+        comments and triggers regeneration (a NEW immutable completion + deterministic delta
+        report); there is no endpoint to edit artifact content in place. Decision + AuditEntry
+        written in the same transaction; the actor must hold the gate's reviewer role
+        (FR-018) and must not be the artifact's drafting actor where self-review is barred.
+      operationId: decideGate
+      parameters: [{ $ref: '#/components/parameters/gateId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verb]
+              properties:
+                verb: { type: string, enum: [APPROVE, REJECT, REQUEST_CHANGES] }
+                rationale: { type: string }
+                comments: { type: string, description: Required for REQUEST_CHANGES }
+      responses:
+        '200':
+          description: Decision recorded; on REQUEST_CHANGES regeneration is started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GateInstance' }
+        '403': { description: Caller lacks the reviewer role, or self-review barred }
+        '409': { description: Gate not in a decidable state }
+
+  /gates/{gateId}/delta-report:
+    get:
+      tags: [gates]
+      summary: Deterministic diff between prior and regenerated revision (FR-005, US2/US3)
+      operationId: getDeltaReport
+      parameters: [{ $ref: '#/components/parameters/gateId' }]
+      responses:
+        '200':
+          description: Unified diff + hash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeltaReport' }
+        '404': { description: No regeneration/reopen has produced a delta for this gate }
+
+  /reopen-candidates:
+    get:
+      tags: [reopen]
+      summary: DMN-identified dependents of revised approved artifacts (FR-006/008, US3)
+      operationId: listReopenCandidates
+      parameters:
+        - { name: disposition, in: query, schema: { type: string, enum: [PENDING, REOPENED, MANUAL_REVIEW, DISMISSED] } }
+      responses:
+        '200':
+          description: Direct (depth 1, reopenable) and transitive (flagged MANUAL_REVIEW) candidates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReopenCandidate' }
+
+  /gates/{gateId}/impact-assessment:
+    post:
+      tags: [reopen]
+      summary: Capture the reason/scope/risk record that must precede a reopen (FR-007, US3)
+      operationId: createImpactAssessment
+      parameters: [{ $ref: '#/components/parameters/gateId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [upstreamArtifactRevisionId, reason, scope, risk]
+              properties:
+                upstreamArtifactRevisionId: { type: string, format: uuid }
+                reason: { type: string }
+                scope: { type: string }
+                risk: { type: string }
+      responses:
+        '201': { description: Impact assessment recorded }
+        '409': { description: Gate is not a reopen candidate }
+
+  /gates/{gateId}/reopen:
+    post:
+      tags: [reopen]
+      summary: Reopen a direct dependent's gate — blocked without impact assessment (FR-007, US3)
+      operationId: reopenGate
+      parameters: [{ $ref: '#/components/parameters/gateId' }]
+      responses:
+        '200': { description: Gate REOPENED as a recorded Decision; delta report attached }
+        '409': { description: No impact assessment captured, or candidate is transitive (manual review only) }
+
+  /gates/{gateId}/escalations:
+    get:
+      tags: [escalations]
+      summary: Visible escalation activations for a gate (FR-010, US4)
+      operationId: listEscalations
+      parameters: [{ $ref: '#/components/parameters/gateId' }]
+      responses:
+        '200':
+          description: Advisory activations (policy version, step, role, assignee_resolved, status)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EscalationActivation' }
+
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: In-app notifications for the caller's roles (FR-010, US4 — v1 delivery surface)
+      operationId: listNotifications
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Persisted in_app_notification rows addressed to the caller's roles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    sourceModule: { type: string }
+                    type: { type: string, enum: [SLA_ESCALATION, TAMPER_ALERT] }
+                    subjectRef: { type: object }
+                    message: { type: string }
+                    createdAt: { type: string, format: date-time }
+                    readAt: { type: string, format: date-time, nullable: true }
+
+  /audit/chain/verify:
+    post:
+      tags: [audit]
+      summary: Verify the workspace's audit hash chain (FR-013, US5)
+      operationId: verifyAuditChain
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fromSegment: { type: integer, description: Verify from this segment (default full chain) }
+      responses:
+        '200':
+          description: Verification result; any broken segment identifies tampering
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  intact: { type: boolean }
+                  segmentsVerified: { type: integer }
+                  firstBrokenSegment: { type: integer, nullable: true }
+
+  /packages/{packageId}/grants:
+    get:
+      tags: [packages]
+      summary: List role grants on a delivered package (FR-015, US5)
+      operationId: listPackageGrants
+      parameters: [{ $ref: '#/components/parameters/packageId' }]
+      responses:
+        '200':
+          description: Active grants (access is default-deny beyond these roles)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PackageGrant' }
+    post:
+      tags: [packages]
+      summary: Grant a role access to a package (audited)
+      operationId: grantPackageAccess
+      parameters: [{ $ref: '#/components/parameters/packageId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string }
+      responses:
+        '201': { description: Grant recorded }
+
+  /workspace/retention:
+    get:
+      tags: [workspace]
+      summary: Read the workspace retention policy (FR-014)
+      operationId: getRetention
+      responses:
+        '200':
+          description: Retention config (default 7 years)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionPolicy' }
+    put:
+      tags: [workspace]
+      summary: Update retention config (workspace owner; ≥ regulatory minimum; audited)
+      operationId: setRetention
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetentionPolicy' }
+      responses:
+        '200': { description: Updated }
+        '422': { description: Below the enforced minimum horizon }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  parameters:
+    gateId:
+      name: gateId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    packageId:
+      name: packageId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    GateInstance:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        caseInstanceId: { type: string, format: uuid }
+        gateType: { type: string, enum: [REVIEW, APPROVAL] }
+        gateDefinitionKey: { type: string }
+        gateDefinitionVersion: { type: integer }
+        status:
+          type: string
+          enum: [OPEN, REGENERATING, APPROVED, REJECTED, REOPEN_CANDIDATE, REOPENED]
+        subjectArtifactRevisionId: { type: string, format: uuid, nullable: true }
+        escalationPolicyKey: { type: string, nullable: true }
+        escalationPolicyVersion: { type: integer, nullable: true }
+        decisionId: { type: string, format: uuid, nullable: true }
+        openedAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time, nullable: true }
+    GateDetail:
+      allOf:
+        - $ref: '#/components/schemas/GateInstance'
+        - type: object
+          properties:
+            inputsRef:
+              type: object
+              description: Exact information the decision is based on (FR-002/003)
+            reviewerComments: { type: string, nullable: true }
+            deltaReportId: { type: string, format: uuid, nullable: true }
+    DeltaReport:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        artifactId: { type: string, format: uuid }
+        fromRevisionId: { type: string, format: uuid }
+        toRevisionId: { type: string, format: uuid }
+        diffContent: { type: string }
+        diffHash: { type: string }
+    ReopenCandidate:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        upstreamArtifactRevisionId: { type: string, format: uuid }
+        dependentArtifactRevisionId: { type: string, format: uuid }
+        gateInstanceId: { type: string, format: uuid, nullable: true }
+        depth: { type: integer, description: 1 = direct (reopenable); >1 = transitive (manual) }
+        disposition: { type: string, enum: [PENDING, REOPENED, MANUAL_REVIEW, DISMISSED] }
+    EscalationActivation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        gateInstanceId: { type: string, format: uuid }
+        policyKey: { type: string }
+        policyVersion: { type: integer }
+        stepIndex: { type: integer }
+        role: { type: string }
+        assigneeResolved: { type: boolean }
+        status: { type: string, enum: [ACTIVE, RESOLVED] }
+        firedAt: { type: string, format: date-time }
+    PackageGrant:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        packageId: { type: string, format: uuid }
+        role: { type: string }
+        grantedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time, nullable: true }
+    RetentionPolicy:
+      type: object
+      properties:
+        retentionYears: { type: integer, minimum: 7, default: 7 }
+        notes: { type: string, nullable: true }
+    GateEventPayload:
+      type: object
+      description: >
+        OUTBOX EVENT CONTRACT (not an HTTP body). Every gate lifecycle event (opened, decided,
+        reopen-candidate, impact-assessed, reopened, escalation-fired, regeneration-triggered)
+        carries this projection-sufficient payload — the set Phase 7's projector depends on
+        (research R8). Asserted by a payload-completeness test.
+      required: [eventType, gateId, gateType, gateDefinitionKey, gateDefinitionVersion, caseInstanceId, workspaceId, occurredAt]
+      properties:
+        eventType:
+          type: string
+          enum: [GATE_OPENED, GATE_DECIDED, GATE_REOPEN_CANDIDATE, GATE_IMPACT_ASSESSED,
+                 GATE_REOPENED, GATE_ESCALATION_FIRED, GATE_REGENERATION_TRIGGERED]
+        gateId: { type: string, format: uuid }
+        gateType: { type: string, enum: [REVIEW, APPROVAL] }
+        gateDefinitionKey: { type: string }
+        gateDefinitionVersion: { type: integer }
+        caseInstanceId: { type: string, format: uuid }
+        workspaceId: { type: string, format: uuid }
+        subjectArtifactRevisionId: { type: string, format: uuid, nullable: true }
+        producedArtifactRevisionId: { type: string, format: uuid, nullable: true }
+        decisionVerb: { type: string, nullable: true, enum: [APPROVE, REJECT, REQUEST_CHANGES, null] }
+        deciderId: { type: string, nullable: true }
+        decisionId: { type: string, format: uuid, nullable: true }
+        impactAssessmentId: { type: string, format: uuid, nullable: true }
+        escalationPolicyKey: { type: string, nullable: true }
+        escalationPolicyVersion: { type: integer, nullable: true }
+        escalationStepIndex: { type: integer, nullable: true }
+        occurredAt: { type: string, format: date-time }

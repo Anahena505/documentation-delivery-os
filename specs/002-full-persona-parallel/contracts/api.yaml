@@ -1,0 +1,285 @@
+openapi: 3.1.0
+info:
+  title: D2OS Phase 2 — Full Persona Suite + Parallel Execution API (delta)
+  version: 0.2.0
+  description: >
+    Delta contract over the Phase 1 API (specs/001-catalog-initiation-case/contracts/api.yaml).
+    Phase 1 endpoints are unchanged and remain in force. New surfaces: attachment upload +
+    sandboxed summary lifecycle, case progress stream (long-poll), consistency findings +
+    human resolution, branch-aware escalation resolution, and workspace budget/limits.
+    All requests remain workspace-scoped (RLS beneath); no endpoint accepts or returns
+    cross-workspace data.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: intake
+  - name: cases
+  - name: consistency
+  - name: escalations
+  - name: workspace
+  - name: metrics
+
+paths:
+  /submissions/{submissionId}/attachments:
+    post:
+      tags: [intake]
+      summary: Upload an attachment for sandboxed extraction + summarization (FR-015, US5)
+      operationId: uploadAttachment
+      parameters: [{ $ref: '#/components/parameters/submissionId' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: >
+            Accepted; extraction+summarization proceeds asynchronously. Raw content is
+            stored workspace-scoped and never enters a persona prompt.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Attachment' }
+        '413': { description: Exceeds size cap }
+        '422': { description: Content type not in allowlist }
+    get:
+      tags: [intake]
+      summary: List attachments and their sandbox lifecycle status
+      operationId: listAttachments
+      parameters: [{ $ref: '#/components/parameters/submissionId' }]
+      responses:
+        '200':
+          description: Attachments with status (RECEIVED/EXTRACTING/SUMMARIZED/REJECTED)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Attachment' }
+
+  /cases/{caseId}/progress:
+    get:
+      tags: [cases]
+      summary: User-visible progress event stream, ≤5 s cadence while running (FR-011, NFR-3)
+      operationId: getProgress
+      parameters:
+        - { $ref: '#/components/parameters/caseId' }
+        - name: afterId
+          in: query
+          schema: { type: integer, format: int64 }
+          description: Return only events with id greater than this cursor
+        - name: wait
+          in: query
+          schema: { type: boolean, default: false }
+          description: >
+            Long-poll — if no events newer than afterId, hold the request until one
+            arrives or the 25 s server timeout elapses (then returns an empty page).
+      responses:
+        '200':
+          description: Ordered progress events (HEARTBEAT guarantees liveness during long AI calls)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProgressEvent' }
+        '404': { description: Case not found in this workspace }
+
+  /cases/{caseId}/consistency-findings:
+    get:
+      tags: [consistency]
+      summary: Cross-artifact consistency findings for a case (FR-006/007/008)
+      operationId: listConsistencyFindings
+      parameters:
+        - { $ref: '#/components/parameters/caseId' }
+        - name: tier
+          in: query
+          schema: { type: string, enum: [DETERMINISTIC, SEMANTIC] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [OPEN, RESOLVED, WAIVED] }
+      responses:
+        '200':
+          description: Findings with artifact references and blocking tier
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ConsistencyFinding' }
+
+  /cases/{caseId}/consistency-findings/{findingId}/resolve:
+    post:
+      tags: [consistency]
+      summary: >
+        Human decision on a finding (Principle V). DETERMINISTIC findings must be RESOLVED
+        (after artifact regeneration) — they cannot be WAIVED. SEMANTIC findings may be
+        WAIVED with rationale. Recorded as an audited Decision.
+      operationId: resolveConsistencyFinding
+      parameters:
+        - { $ref: '#/components/parameters/caseId' }
+        - name: findingId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution, rationale]
+              properties:
+                resolution: { type: string, enum: [RESOLVED, WAIVED] }
+                rationale: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Finding updated; audit entry + Decision written
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsistencyFinding' }
+        '409': { description: WAIVED requested on a DETERMINISTIC finding }
+
+  /cases/{caseId}/escalations/{invocationId}/resolve:
+    post:
+      tags: [escalations]
+      summary: >
+        Resolve a branch-level persona escalation (FR-005). Signals the waiting BPMN branch;
+        sibling branch outputs are retained and the join proceeds once all branches complete.
+      operationId: resolveBranchEscalation
+      parameters:
+        - { $ref: '#/components/parameters/caseId' }
+        - name: invocationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, rationale]
+              properties:
+                action: { type: string, enum: [RETRY, ACCEPT_LAST_OUTPUT] }
+                rationale: { type: string, minLength: 1 }
+      responses:
+        '200': { description: Branch signalled; Case leaves Escalated when no branch remains escalated }
+        '409': { description: Invocation is not in an escalated state }
+
+  /workspace/budget:
+    get:
+      tags: [workspace]
+      summary: Workspace-level AI budget rollup and limits (FR-017, T5-b)
+      operationId: getWorkspaceBudget
+      responses:
+        '200':
+          description: Current period cap, consumption, and rate limit for the caller's workspace
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkspaceBudget' }
+
+  /metrics/dashboard:
+    get:
+      tags: [metrics]
+      summary: >
+        Extended Phase 1 dashboard payload — adds gateCycleTimeSeconds and regenerationRate
+        (§KP Phase 2 additions). Existing fields unchanged.
+      operationId: getDashboardV2
+      responses:
+        '200':
+          description: KPI dashboard payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardV2' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+
+  parameters:
+    submissionId:
+      name: submissionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    caseId:
+      name: caseId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    Attachment:
+      type: object
+      required: [id, filename, contentType, sizeBytes, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        filename: { type: string }
+        contentType: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        contentHash: { type: string, description: SHA-256 of stored bytes }
+        status: { type: string, enum: [RECEIVED, EXTRACTING, SUMMARIZED, REJECTED] }
+        rejectionReason: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    ProgressEvent:
+      type: object
+      required: [id, caseId, kind, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        caseId: { type: string, format: uuid }
+        kind:
+          type: string
+          enum: [STEP_STARTED, STEP_COMPLETED, VALIDATION_ATTEMPT, BRANCH_FORKED,
+                 BRANCH_JOINED, HEARTBEAT, ESCALATED, SUSPENDED, RECONCILED, DELIVERED]
+        activityId: { type: string, description: BPMN activity / persona key }
+        detail: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+
+    ConsistencyFinding:
+      type: object
+      required: [id, caseId, tier, kind, subjectRef, sourceArtifactId, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        tier: { type: string, enum: [DETERMINISTIC, SEMANTIC] }
+        kind: { type: string, enum: [DANGLING_REFERENCE, ATTRIBUTE_CONTRADICTION, SEMANTIC_INCOHERENCE] }
+        subjectRef: { type: string, example: 'entity:Order' }
+        sourceArtifactId: { type: string, format: uuid }
+        targetArtifactId: { type: string, format: uuid }
+        detail: { type: object, additionalProperties: true }
+        status: { type: string, enum: [OPEN, RESOLVED, WAIVED] }
+        resolvedBy: { type: string }
+        resolvedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+
+    WorkspaceBudget:
+      type: object
+      required: [periodStart, tokenCap, tokensConsumed, rateLimitPerMinute]
+      properties:
+        periodStart: { type: string, format: date }
+        tokenCap: { type: integer, format: int64 }
+        tokensConsumed: { type: integer, format: int64 }
+        rateLimitPerMinute: { type: integer }
+
+    DashboardV2:
+      type: object
+      description: Superset of the Phase 1 dashboard payload
+      properties:
+        firstPassValidationRate: { type: number }
+        packageCompleteness: { type: number }
+        caseCostTokens: { type: object, additionalProperties: { type: integer } }
+        gateCycleTimeSeconds:
+          type: object
+          description: p50/p95 of wait-state entry→resume durations
+          properties:
+            p50: { type: number }
+            p95: { type: number }
+        regenerationRate:
+          type: number
+          description: revise-loop generations beyond first, per delivered package

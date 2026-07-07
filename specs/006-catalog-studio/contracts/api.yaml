@@ -1,0 +1,323 @@
+openapi: 3.1.0
+info:
+  title: D2OS Phase 6 — Catalog Studio API (delta)
+  version: 0.6.0
+  description: >
+    Delta contract over the Phase 1–5 APIs. Prior endpoints unchanged. The studio UI is
+    server-rendered (Thymeleaf + htmx) over these JSON endpoints, which are the testable
+    contract: draft CRUD per definition type, publish lifecycle (submit-for-review → D4 gate →
+    publish, MAJOR architecture-board gate), deprecation impact report, fork-with-provenance,
+    compatibility matrix, and Global-library copy-on-subscribe. All requests workspace-scoped;
+    the Global library (system workspace) is read-only to workspaces.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: drafts
+  - name: publish
+  - name: lifecycle
+  - name: library
+
+paths:
+  /catalog/drafts:
+    get:
+      tags: [drafts]
+      summary: List draft/in-review definition versions (US1)
+      operationId: listDrafts
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [case_type, workflow, persona, playbook, template, rule, rubric, prompt]
+        - { name: status, in: query, schema: { type: string, enum: [Draft, InReview] } }
+      responses:
+        '200':
+          description: Workspace drafts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DefinitionVersion' }
+    post:
+      tags: [drafts]
+      summary: Create a draft candidate version of any of the 8 types (FR-001, US1)
+      operationId: createDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, key, version, body]
+              properties:
+                type:
+                  type: string
+                  enum: [case_type, workflow, persona, playbook, template, rule, rubric, prompt]
+                key: { type: string }
+                version: { type: string, description: semver; ordering enforced at publish }
+                body: { type: object, description: typed-slot content; DMN XML for rules }
+                derivedFromId:
+                  type: string
+                  format: uuid
+                  description: Present when forking — records fork-with-provenance (FR-012)
+      responses:
+        '201':
+          description: Draft persisted; not resolvable by any case until published
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DefinitionVersion' }
+        '409': { description: (type, key, version) already exists }
+
+  /catalog/drafts/{draftId}:
+    get:
+      tags: [drafts]
+      summary: Load a draft for continued editing (US1)
+      operationId: getDraft
+      parameters: [{ $ref: '#/components/parameters/draftId' }]
+      responses:
+        '200':
+          description: Full draft content (typed slots / DMN XML)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DefinitionVersion' }
+    put:
+      tags: [drafts]
+      summary: Update draft content (Draft status only)
+      operationId: updateDraft
+      parameters: [{ $ref: '#/components/parameters/draftId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: object }
+      responses:
+        '200': { description: Draft updated }
+        '409': { description: Not editable — draft is InReview or beyond (R2 freeze) }
+
+  /catalog/drafts/{draftId}/submit-review:
+    post:
+      tags: [publish]
+      summary: Draft → InReview; opens the D4 approval gate (FR-004, US2)
+      description: >
+        Freezes the draft (content hash pinned), starts a Phase 5 approval-gate instance with
+        subject DEFINITION_VERSION. For Prompt/Persona versions the gate carries a rendered
+        prompt-text diff against the prior published version as first-class review content
+        (FR-005); other types get a canonical content diff. If the semver increment is MAJOR, a
+        second architecture-board gate is chained (FR-007).
+      operationId: submitForReview
+      parameters: [{ $ref: '#/components/parameters/draftId' }]
+      responses:
+        '200':
+          description: InReview; gate reference(s) returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewState' }
+        '409': { description: Not in Draft status }
+
+  /catalog/drafts/{draftId}/publish:
+    post:
+      tags: [publish]
+      summary: Publish after gates pass — checksum + semver enforced (FR-006, US2)
+      operationId: publishDraft
+      parameters: [{ $ref: '#/components/parameters/draftId' }]
+      responses:
+        '200':
+          description: Published (immutable); checksum recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DefinitionVersion' }
+        '409':
+          description: >
+            Gate(s) not passed, semver/checksum conflict with an existing published version, or
+            content hash changed since submission — conflict surfaced, nothing overwritten
+            (FR-018).
+
+  /catalog/definitions/{definitionId}/deprecation-impact:
+    get:
+      tags: [lifecycle]
+      summary: Generate the deprecation impact report (FR-010, US3)
+      operationId: getDeprecationImpact
+      parameters: [{ $ref: '#/components/parameters/definitionId' }]
+      responses:
+        '200':
+          description: >
+            All dependents — active cases pinned to the exact (key, version), definition-graph
+            dependents, and downstream subscription copies. Zero pinned dependents omitted
+            (SC-005).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImpactReport' }
+
+  /catalog/definitions/{definitionId}/deprecate:
+    post:
+      tags: [lifecycle]
+      summary: Confirm deprecation — requires a generated impact report (US3)
+      operationId: deprecateDefinition
+      parameters: [{ $ref: '#/components/parameters/definitionId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [impactReportId, reason]
+              properties:
+                impactReportId: { type: string, format: uuid }
+                reason: { type: string }
+      responses:
+        '200': { description: Deprecated (audited); running cases keep their pinned version }
+        '409': { description: No current impact report presented — deprecation must be informed }
+
+  /catalog/compatibility-matrix:
+    get:
+      tags: [lifecycle]
+      summary: Computed cross-type version compatibility view (FR-011, US3)
+      operationId: getCompatibilityMatrix
+      parameters:
+        - { name: type, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Declared-range evaluation across published versions; out-of-range pins flagged
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CompatibilityRow' }
+
+  /library/definitions:
+    get:
+      tags: [library]
+      summary: Browse the Global shared library (read-only) (US4)
+      operationId: browseGlobalLibrary
+      parameters:
+        - { name: type, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Published Global-library versions with subscription state for the caller's workspace
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DefinitionVersion' }
+
+  /library/definitions/{definitionId}/subscribe:
+    post:
+      tags: [library]
+      summary: Copy-on-subscribe a Global version into the workspace (FR-013–015, US4)
+      description: >
+        Creates the workspace's OWN copy (same key/version/body/checksum) with copied_from_id
+        provenance and a library_subscription record, in one audited transaction. The copy is
+        insulated from any later change/deprecation of the Global source. Never a live reference.
+      operationId: subscribeToDefinition
+      parameters: [{ $ref: '#/components/parameters/definitionId' }]
+      responses:
+        '201':
+          description: Workspace copy created with provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubscriptionResult' }
+        '409': { description: Already subscribed to this source version }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  parameters:
+    draftId:
+      name: draftId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    definitionId:
+      name: definitionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    DefinitionVersion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [case_type, workflow, persona, playbook, template, rule, rubric, prompt]
+        key: { type: string }
+        version: { type: string }
+        status: { type: string, enum: [Draft, InReview, Published, Deprecated] }
+        locale: { type: string }
+        checksum: { type: string, nullable: true }
+        derivedFromId: { type: string, format: uuid, nullable: true }
+        copiedFromId: { type: string, format: uuid, nullable: true }
+        publishedAt: { type: string, format: date-time, nullable: true }
+        createdBy: { type: string }
+    ReviewState:
+      type: object
+      properties:
+        draftId: { type: string, format: uuid }
+        status: { type: string, enum: [InReview] }
+        d4GateId: { type: string, format: uuid }
+        architectureBoardGateId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Present iff the semver increment is MAJOR (FR-007)
+        deltaReportId: { type: string, format: uuid, description: Prompt/content diff for review (FR-005) }
+        contentHash: { type: string, description: Pinned at submission; publish verifies it }
+    ImpactReport:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        definitionId: { type: string, format: uuid }
+        generatedAt: { type: string, format: date-time }
+        pinnedActiveCases:
+          type: array
+          items:
+            type: object
+            properties:
+              caseInstanceId: { type: string, format: uuid }
+              caseType: { type: string }
+              status: { type: string }
+        definitionDependents:
+          type: array
+          items:
+            type: object
+            properties:
+              definitionId: { type: string, format: uuid }
+              type: { type: string }
+              key: { type: string }
+              version: { type: string }
+        subscriptionCopies:
+          type: array
+          items:
+            type: object
+            properties:
+              workspaceId: { type: string, format: uuid }
+              copiedDefinitionId: { type: string, format: uuid }
+    CompatibilityRow:
+      type: object
+      properties:
+        definitionKey: { type: string }
+        definitionVersion: { type: string }
+        declaredCompatibleWith:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              key: { type: string }
+              range: { type: string, example: '>=1.2.0 <2.0.0' }
+        outOfRangePins:
+          type: array
+          items: { type: string, description: 'pin outside a declared range (flagged)' }
+    SubscriptionResult:
+      type: object
+      properties:
+        subscriptionId: { type: string, format: uuid }
+        sourceDefinitionId: { type: string, format: uuid }
+        copiedDefinitionId: { type: string, format: uuid }
+        checksumVerified: { type: boolean, description: copy checksum equals source (T4-d proof) }

@@ -1,0 +1,189 @@
+openapi: 3.1.0
+info:
+  title: D2OS Phase 4 — Assessment + Enhancement Case Types API (delta)
+  version: 0.4.0
+  description: >
+    Delta contract over the Phase 1–3 APIs (specs/001…003 contracts). Prior endpoints unchanged.
+    New surfaces: case-type classification proposal + human confirm/override, mutating-case
+    guard conflict semantics on case creation, and Enhancement baseline visibility. All requests
+    remain workspace-scoped (RLS beneath); no endpoint accepts or returns cross-workspace data.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: intake
+  - name: cases
+
+paths:
+  /submissions/{submissionId}/case-type:
+    get:
+      tags: [intake]
+      summary: Read the DMN classification proposal for a submission (FR-002/FR-004, US1)
+      operationId: getCaseTypeProposal
+      parameters: [{ $ref: '#/components/parameters/submissionId' }]
+      responses:
+        '200':
+          description: >
+            Proposal (may be UNDETERMINED — ambiguity is surfaced, never guessed) plus
+            confirmation state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseTypeClassification' }
+
+  /submissions/{submissionId}/case-type/confirm:
+    post:
+      tags: [intake]
+      summary: Human confirm or override of the proposed case type (FR-003, US1)
+      description: >
+        Mandatory before Case creation. Confirming with a type different from the proposal
+        records an override; both proposal and confirmed type are preserved and the decision is
+        written as a Decision + AuditEntry in the same transaction. For ENHANCEMENT the target
+        Feature must have a Delivered baseline (FR-010) — otherwise 422.
+      operationId: confirmCaseType
+      parameters: [{ $ref: '#/components/parameters/submissionId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [caseType]
+              properties:
+                caseType: { type: string, enum: [INITIATION, ASSESSMENT, ENHANCEMENT] }
+                rationale: { type: string, description: Required when overriding the proposal }
+      responses:
+        '200':
+          description: Confirmed; submission ready for case creation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseTypeClassification' }
+        '409': { description: Already confirmed }
+        '422': { description: ENHANCEMENT confirmed against a Feature with no delivered baseline }
+
+  /cases:
+    post:
+      tags: [cases]
+      summary: Create a Case from a confirmed submission (guard semantics added — FR-012, US4)
+      description: >
+        Existing Phase 1 endpoint with new failure modes. Mutating case types (INITIATION,
+        ENHANCEMENT) acquire the Feature's single-active-mutating-case slot via an optimistic
+        version check; a second concurrent mutating case is rejected 409 with the active case
+        reference — never queued, never locked. ASSESSMENT is exempt and always admitted.
+        The pinned CaseDefinitionSnapshot includes conditional-artifact DMN additions (FR-014).
+      operationId: createCase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [submissionId, featureId]
+              properties:
+                submissionId: { type: string, format: uuid }
+                featureId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Case created with the confirmed type; snapshot pinned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseCreated' }
+        '409':
+          description: A mutating case is already active on this Feature (optimistic check failed)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutatingConflict' }
+        '412': { description: Submission classification not yet confirmed }
+
+  /cases/{caseId}/baseline:
+    get:
+      tags: [cases]
+      summary: Inspect the resolved baseline of an Enhancement case (FR-009/FR-011, US3)
+      operationId: getCaseBaseline
+      parameters: [{ $ref: '#/components/parameters/caseId' }]
+      responses:
+        '200':
+          description: >
+            The pinned baseline artifact revisions this case enhances, each with its
+            supersession/deprecation status surfaced for the impact analysis.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BaselineEntry' }
+        '404': { description: Case is not an Enhancement case or baseline not yet resolved }
+
+  /cases/{caseId}/required-artifacts:
+    get:
+      tags: [cases]
+      summary: Read the case's expected artifact set incl. conditional additions (FR-014/015, US5)
+      operationId: getRequiredArtifacts
+      parameters: [{ $ref: '#/components/parameters/caseId' }]
+      responses:
+        '200':
+          description: Frozen expected set from the CaseDefinitionSnapshot, with fulfillment state
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    templateKey: { type: string }
+                    source: { type: string, enum: [BASE, CONDITIONAL] }
+                    conditionalReason: { type: string, nullable: true, example: personal_data }
+                    fulfilled: { type: boolean }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  parameters:
+    submissionId:
+      name: submissionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    caseId:
+      name: caseId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    CaseTypeClassification:
+      type: object
+      properties:
+        submissionId: { type: string, format: uuid }
+        proposedCaseType:
+          type: string
+          enum: [INITIATION, ASSESSMENT, ENHANCEMENT, UNDETERMINED]
+        confirmedCaseType:
+          type: string
+          nullable: true
+          enum: [INITIATION, ASSESSMENT, ENHANCEMENT, null]
+        classificationStatus: { type: string, enum: [PROPOSED, CONFIRMED] }
+        overridden: { type: boolean }
+        decisionId: { type: string, format: uuid, nullable: true }
+    CaseCreated:
+      type: object
+      properties:
+        caseId: { type: string, format: uuid }
+        caseType: { type: string, enum: [INITIATION, ASSESSMENT, ENHANCEMENT] }
+        mutating: { type: boolean }
+        snapshotId: { type: string, format: uuid }
+    MutatingConflict:
+      type: object
+      properties:
+        featureId: { type: string, format: uuid }
+        activeCaseId: { type: string, format: uuid }
+        message:
+          type: string
+          example: A mutating case is already active on this Feature; complete or cancel it first.
+    BaselineEntry:
+      type: object
+      properties:
+        artifactRevisionId: { type: string, format: uuid }
+        artifactKey: { type: string }
+        revision: { type: integer }
+        packageId: { type: string, format: uuid }
+        superseded: { type: boolean }
+        deprecated: { type: boolean }

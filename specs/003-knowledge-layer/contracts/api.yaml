@@ -1,0 +1,350 @@
+openapi: 3.1.0
+info:
+  title: D2OS Phase 3 — Knowledge Layer API (delta)
+  version: 0.3.0
+  description: >
+    Delta contract over the Phase 1 and Phase 2 APIs (specs/001.../contracts/api.yaml,
+    specs/002.../contracts/api.yaml). Prior endpoints are unchanged and remain in force.
+    New surfaces: knowledge item listing/inspection/deprecation, capture-candidate pipeline
+    (curator redaction, D4 decision), deprecation-affected execution review, and the
+    knowledge-influence evaluation/KPI surface. All requests remain workspace-scoped (RLS
+    beneath, knowledge_item additionally LIST-partitioned per workspace); no endpoint accepts
+    or returns cross-workspace data. Persona-side retrieval is NOT exposed over HTTP — it is
+    an internal Open Host Service (persona/spi/KnowledgeProvider) consumed during envelope
+    building; this contract covers only the human/governance/operator surface.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: knowledge
+  - name: candidates
+  - name: deprecation
+  - name: metrics
+
+paths:
+  /knowledge/items:
+    get:
+      tags: [knowledge]
+      summary: List knowledge items in the caller's workspace (FR-001/FR-002 operator view)
+      operationId: listKnowledgeItems
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [PUBLISHED, DEPRECATED] } }
+        - { name: scopeLevel, in: query, schema: { type: string, enum: [WORKSPACE, PROJECT] } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: key, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Workspace-scoped item versions (never another workspace's items)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KnowledgeItem' }
+
+  /knowledge/items/{itemId}:
+    get:
+      tags: [knowledge]
+      summary: Inspect one item version, including provenance chain (US3 review)
+      operationId: getKnowledgeItem
+      parameters: [{ $ref: '#/components/parameters/itemId' }]
+      responses:
+        '200':
+          description: The item version with source-candidate and supersedes provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeItem' }
+        '404': { description: Not found in this workspace }
+
+  /knowledge/items/{itemId}/deprecate:
+    post:
+      tags: [deprecation]
+      summary: Deprecate an item version — audited governance action (FR-014/FR-015, US3)
+      description: >
+        Sets status DEPRECATED, and in the same transaction flags every past
+        OperationExecution whose injection snapshot referenced the deprecated version
+        (knowledge_affected_execution). Historical snapshots and outputs are never modified.
+      operationId: deprecateKnowledgeItem
+      parameters: [{ $ref: '#/components/parameters/itemId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Deprecated; returns count of flagged affected executions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  itemId: { type: string, format: uuid }
+                  affectedExecutions: { type: integer }
+        '409': { description: Already deprecated }
+
+  /knowledge/affected-executions:
+    get:
+      tags: [deprecation]
+      summary: List executions flagged by deprecations for review (SC-007)
+      operationId: listAffectedExecutions
+      parameters:
+        - { name: reviewStatus, in: query, schema: { type: string, enum: [OPEN, REVIEWED] } }
+        - { name: knowledgeKey, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Flagged executions (append-only flags; executions untouched)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AffectedExecution' }
+
+  /knowledge/affected-executions/{flagId}/review:
+    post:
+      tags: [deprecation]
+      summary: Acknowledge a flagged execution as reviewed (flag-only status; audited)
+      operationId: reviewAffectedExecution
+      parameters:
+        - { name: flagId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Flag marked REVIEWED; execution history unchanged }
+
+  /knowledge/candidates:
+    get:
+      tags: [candidates]
+      summary: List capture candidates and their pipeline state (US2)
+      operationId: listCandidates
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [CAPTURED, PREFILTERED, REDACTED, D4_PENDING, PUBLISHED, REJECTED]
+        - { name: caseId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Candidates with gate trail; confidential until PUBLISHED
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CaptureCandidate' }
+
+  /knowledge/candidates/{candidateId}:
+    get:
+      tags: [candidates]
+      summary: Inspect a candidate — latest revision, prefilter findings, gate records
+      operationId: getCandidate
+      parameters: [{ $ref: '#/components/parameters/candidateId' }]
+      responses:
+        '200':
+          description: Full pipeline view (revisions chained via revisionOf)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CandidateDetail' }
+
+  /knowledge/candidates/{candidateId}/redaction:
+    post:
+      tags: [candidates]
+      summary: Save the Curator redaction as a new candidate revision (FR-011, US2)
+      description: >
+        Accepts the human-confirmed redacted content produced with the Curator persona's
+        rubric-validated draft. Creates a NEW revision (prior revision preserved for audit);
+        transitions PREFILTERED → REDACTED. Only the latest revision proceeds to D4.
+      operationId: saveRedaction
+      parameters: [{ $ref: '#/components/parameters/candidateId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, content, tags]
+              properties:
+                title: { type: string }
+                content: { type: string }
+                tags: { type: array, items: { type: string } }
+      responses:
+        '201': { description: New revision created; candidate REDACTED }
+        '409': { description: Candidate not in PREFILTERED state }
+
+  /knowledge/candidates/{candidateId}/d4:
+    post:
+      tags: [candidates]
+      summary: Workspace-owner D4 decision on the redacted candidate (FR-009/FR-013, US2)
+      description: >
+        Approve publishes the latest redacted revision as a KnowledgeItem version with
+        provenance (scope raised to the approved level); reject leaves the candidate
+        confidential and non-promotable with the reason recorded. The D4 actor must hold the
+        workspace-owner role and must not be the redaction actor (non-self-satisfiable gate).
+        Both outcomes write a Decision row + AuditEntry in the same transaction.
+      operationId: decideD4
+      parameters: [{ $ref: '#/components/parameters/candidateId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome]
+              properties:
+                outcome: { type: string, enum: [APPROVE, REJECT] }
+                scopeLevel: { type: string, enum: [WORKSPACE, PROJECT], default: WORKSPACE }
+                reason: { type: string, description: Required when outcome=REJECT }
+      responses:
+        '200':
+          description: Decision recorded; on APPROVE returns the published item reference
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  outcome: { type: string, enum: [APPROVE, REJECT] }
+                  publishedItemId: { type: string, format: uuid, nullable: true }
+        '403': { description: Caller lacks workspace-owner role, or is the redaction actor }
+        '409': { description: Candidate not in D4_PENDING state, or gate order violated }
+
+  /knowledge/items/{itemId}/influence-evaluations:
+    post:
+      tags: [metrics]
+      summary: Run a paired with/without influence evaluation for an item (FR-017, US4)
+      description: >
+        Executes the referenced operation twice under identical inputs and rubric version
+        (with the item force-included, then force-excluded), both as real snapshot-recorded
+        executions flagged evaluation=true, and emits kpi_sample
+        metric=knowledge_influence with the rubric-score delta.
+      operationId: runInfluenceEvaluation
+      parameters: [{ $ref: '#/components/parameters/itemId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operationDefinitionKey]
+              properties:
+                operationDefinitionKey: { type: string }
+      responses:
+        '202': { description: Evaluation started (async; result lands as a KPI sample) }
+
+  /metrics/knowledge-influence:
+    get:
+      tags: [metrics]
+      summary: Read knowledge-influence values per item (FR-018)
+      operationId: getKnowledgeInfluence
+      parameters:
+        - { name: key, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: >
+            Per item: measured delta samples, or state=NOT_YET_MEASURABLE for an item never
+            injected/evaluated (never a fabricated value).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/InfluenceReading' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  parameters:
+    itemId:
+      name: itemId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    candidateId:
+      name: candidateId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    KnowledgeItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string }
+        version: { type: integer }
+        scopeLevel: { type: string, enum: [WORKSPACE, PROJECT] }
+        scopeRef: { type: string, format: uuid }
+        tags: { type: array, items: { type: string } }
+        locale: { type: string }
+        title: { type: string }
+        content: { type: string }
+        contentHash: { type: string }
+        status: { type: string, enum: [PUBLISHED, DEPRECATED] }
+        sourceCandidateId: { type: string, format: uuid, nullable: true }
+        supersedesVersion: { type: integer, nullable: true }
+        deprecationReason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    CaptureCandidate:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        caseInstanceId: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        revision: { type: integer }
+        revisionOf: { type: string, format: uuid, nullable: true }
+        title: { type: string }
+        status:
+          type: string
+          enum: [CAPTURED, PREFILTERED, REDACTED, D4_PENDING, PUBLISHED, REJECTED]
+        rejectionStage: { type: string, nullable: true, enum: [PREFILTER, CURATION, D4, null] }
+        rejectionReason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    CandidateDetail:
+      allOf:
+        - $ref: '#/components/schemas/CaptureCandidate'
+        - type: object
+          properties:
+            content: { type: string }
+            tags: { type: array, items: { type: string } }
+            prefilterFindings:
+              type: array
+              items:
+                type: object
+                properties:
+                  category: { type: string }
+                  spanStart: { type: integer }
+                  spanEnd: { type: integer }
+                  source: { type: string }
+            gateRecords:
+              type: array
+              items:
+                type: object
+                properties:
+                  gate: { type: string, enum: [PREFILTER, CURATION, D4] }
+                  outcome: { type: string, enum: [PASS, REJECT] }
+                  actor: { type: string }
+                  decisionId: { type: string, format: uuid, nullable: true }
+                  createdAt: { type: string, format: date-time }
+    AffectedExecution:
+      type: object
+      properties:
+        flagId: { type: string, format: uuid }
+        knowledgeItemKey: { type: string }
+        knowledgeItemVersion: { type: integer }
+        operationExecutionId: { type: string, format: uuid }
+        caseInstanceId: { type: string, format: uuid }
+        flaggedAt: { type: string, format: date-time }
+        reviewStatus: { type: string, enum: [OPEN, REVIEWED] }
+    InfluenceReading:
+      type: object
+      properties:
+        key: { type: string }
+        version: { type: integer }
+        state: { type: string, enum: [MEASURED, NOT_YET_MEASURABLE] }
+        samples:
+          type: array
+          items:
+            type: object
+            properties:
+              delta: { type: number }
+              operationDefinitionKey: { type: string }
+              recordedAt: { type: string, format: date-time }
