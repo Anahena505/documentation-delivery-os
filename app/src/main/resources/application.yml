@@ -72,17 +72,27 @@ d2os:
     # and the chosen embed-model's output dimension. Requested from the provider AND enforced on the
     # response — a mismatch throws EmbeddingDimensionException at the gateway rather than failing
     # cryptically at Postgres insert/query time. Changing this requires a matching DB migration.
+    #
+    # RE-INDEX CONTRACT (research R3): stored item vectors and query vectors are only comparable when
+    # embedded by the SAME model. Every knowledge_item records the embed_model that produced it; the
+    # retrieval query filters to rows whose embed_model equals the CURRENTLY configured provider:model,
+    # so items embedded under a prior model are excluded (safe, visible: retrieval returns fewer/zero
+    # items) rather than mis-ranked against a foreign-space query vector. Changing embed-model or
+    # embed-dimensions therefore requires re-embedding existing items (publish new versions through
+    # EmbeddingIndexer under the new model) before they are retrievable again. No in-place re-embed job
+    # ships in v1 — a model swap is an explicit operational migration, not a config toggle.
     embed-dimensions: ${D2OS_AI_EMBED_DIMENSIONS:384}
   # Knowledge layer (Phase 3). Retrieval is bounded so injected knowledge cannot grow prompts
   # without limit (NFR-7) or add user-visible latency (research R10).
   knowledge:
-    # Max KnowledgeItems injected into one persona operation (research R10, FR-002).
+    # Max KnowledgeItems injected into one persona operation (research R10, FR-002). Prompt growth is
+    # bounded by this item-count cap; each injected item's tokens are additionally charged against the
+    # per-case budget by TokenBudgetGuard (research R10, NFR-7). v1 deliberately has NO per-item token
+    # ceiling — see research R10: a mid-flight content truncation would diverge from the content_hash
+    # retrieval already computed, breaking the injection-snapshot/replay contract (FR-006/FR-007).
     max-items-per-operation: ${D2OS_KNOWLEDGE_MAX_ITEMS:5}
     # Retrieval latency budget, p95, measured by KnowledgeRetrievalIT (research R10).
     retrieval-budget-ms: ${D2OS_KNOWLEDGE_RETRIEVAL_BUDGET_MS:500}
-    # Per-item token ceiling before an item is truncated/skipped at envelope insertion; injected
-    # tokens are counted against the per-case budget by TokenBudgetGuard (research R10, NFR-7).
-    per-item-token-ceiling: ${D2OS_KNOWLEDGE_PER_ITEM_TOKEN_CEILING:1024}
   validation:
     rubric-pass-threshold: 0.80   # weighted ≥80% AND no critical fail (FR-005)
     max-generations: 3            # original + 2 revises, then escalate (FR-005)

@@ -61,6 +61,20 @@ per retrieval. Deterministic stub vectors keep replay and leakage suites free of
 gateway-only rule and adds a native dependency); embedding lazily at first retrieval — rejected
 (makes the first retrieval slow and pushes writes into the read path).
 
+> **Re-index contract (v1, gap-1 remediation).** Cosine distance is only meaningful between vectors
+> produced by the *same* embedding model, so item vectors and query vectors must share a model. Two
+> guards enforce this: (a) `embed-dimensions` is requested from the provider and validated on the
+> response (`EmbeddingDimensionException`), and the DB column is `VECTOR(384)` — so a *dimension* swap
+> fails loud and additionally needs a migration; (b) `KnowledgeRetrievalService` ranks only rows whose
+> `embed_model` equals the model that just produced the query vector (an `embed_model = ?` predicate,
+> the model string built identically on both sides as `modelId:modelVersion`). After a same-dimension
+> *model* swap, items embedded under the prior model fall out of the entitled set — retrieval returns
+> fewer/zero items (a visible, safe signal) instead of mis-ranking across vector spaces. **Changing
+> `embed-model`/`embed-dimensions` therefore requires re-embedding existing items** (publish new
+> versions through `EmbeddingIndexer` under the new model). No in-place re-embed job ships in v1 — a
+> model swap is an explicit operational migration, not a config toggle. A batch re-embed job is the
+> natural follow-on when a model change is actually needed.
+
 ## R4. Scope lattice representation
 
 **Decision**: Two-level lattice in v1, encoded as `scope_level` (`WORKSPACE` | `PROJECT`) +
@@ -131,6 +145,18 @@ and pinned cases are unaffected (Principle I). The D4 gate stays a lightweight i
 Decision row in v1 — the first-class Review/Approval-Gate subprocess is explicitly Phase 5;
 building it early would duplicate E5.1.
 
+> **Accepted limitation (v1, gap-4): capture start/release is single-node safe, not multi-node safe.**
+> `CaseDeliveredKnowledgeTrigger` uses a check-then-start (query for an existing capture instance by case
+> business key, then start one) with no DB/Flowable business-key uniqueness constraint, and
+> `CaptureService.captureFrom` is idempotent by existing candidates. On a single node these serialize
+> correctly; across nodes two schedulers could pass the check simultaneously and double-start. That is
+> accepted for v1 (single-region single-node deployment, per spec Assumptions). One near-free robustness
+> fix *is* applied now: `CaptureWaitReleaserImpl` releases the D4 wait with `list()` (releasing every
+> match) rather than `singleResult()`, which would *throw* if duplicate instances ever shared a business
+> key — so a stray duplicate degrades to a harmless redundant trigger, never an exception. Full multi-node
+> safety (a `UNIQUE`/business-key backstop on `capture_candidate(case_instance_id)` for revision 1 and a
+> Flowable business-key guard) is deferred to the horizontal-scale workstream, not built in v1.
+
 **Alternatives considered**: callActivity appended to initiation-v3 — rejected (requires a new
 workflow version per case type per Phase, couples capture to authoring workflows, no benefit);
 purely service-driven pipeline without BPMN — rejected (the human D4 wait state needs the engine's
@@ -182,6 +208,19 @@ Insert-select in the same transaction gives an exact, point-in-time affected set
 flag column on `operation_execution` — rejected (touches Phase 1 runtime rows and mixes concerns;
 append-only side table is cleaner and RLS-scoped the same way).
 
+> **Accepted limitation (v1, gap-2): flagging is point-in-time at deprecation, not real-time
+> exhaustive under concurrency.** The insert-select captures exactly the executions whose snapshots are
+> committed *when it runs*. An operation whose envelope was built while the item was still PUBLISHED but
+> whose execution+snapshot commit *after* the insert-select is never flagged — and FR-014 explicitly
+> permits that in-flight execution to keep its snapshotted version, so such rows exist by design. SC-007's
+> "flags 100%" therefore holds for the demonstration set (single-node, single-threaded ITs) but is not a
+> real-time invariant under concurrent deprecation. This is accepted for v1: deployment is single-region
+> single-node and the flag is an operator-review discoverability aid, not a correctness gate (history is
+> never rewritten either way — FR-016 holds unconditionally). The clean future closure is a
+> **reconciliation sweep** mirroring `orchestration/ReconciliationJob`: because `FLAG_AFFECTED_SQL` is
+> already `NOT EXISTS`-idempotent, a periodic re-run over DEPRECATED items would catch late-committing
+> executions and make the 100% claim eventually-consistent. Not built in v1.
+
 ## R9. Knowledge-influence KPI (E3.4)
 
 **Decision**: `InfluenceEvaluationService` runs an explicit, on-demand **paired evaluation**: for a
@@ -214,12 +253,28 @@ reporting, it "does not itself gate delivery").
 ## R10. Retrieval query shape and budget
 
 **Decision**: Retrieval = single SQL query per operation: mandatory predicates
-(`workspace_id = :ws`, status `PUBLISHED`, scope ancestor-or-equal of the operation's context,
-tag overlap with operation tags ∩ persona profile) ordered by vector similarity to the operation's
-context embedding (embedded via one gateway `embed` call on the operation's task framing), capped
-at `d2os.knowledge.max-items-per-operation` (default 5) and a per-item token ceiling before
-envelope insertion (existing TokenBudgetGuard accounts injected tokens against the case budget).
-Budget: ≤ 500 ms p95 at seeded scale, measured in KnowledgeRetrievalIT.
+(`workspace_id = :ws`, status `PUBLISHED`, `embed_model =` the current query model (R3 re-index
+contract), scope ancestor-or-equal of the operation's context, tag overlap with operation tags ∩
+persona profile) ordered by vector similarity to the operation's context embedding (embedded via one
+gateway `embed` call on the operation's task framing), capped at
+`d2os.knowledge.max-items-per-operation` (default 5). The existing TokenBudgetGuard accounts the
+injected tokens against the per-case budget. Budget: ≤ 500 ms p95 at seeded scale, measured in
+KnowledgeRetrievalIT.
+
+> **Scope wiring (v1, gap-6 remediation).** `ExecutionEnvelopeBuilder` resolves the operation's project
+> through the `case_instance → feature → project_version` chain (the same two-hop lookup `CaptureService`
+> uses) and passes it as the query's `projectId`, so the PROJECT branch of the scope lattice is reached
+> by real persona operations — not only by direct SPI calls in tests. Resolution is best-effort: if the
+> feature chain is unresolvable (e.g. a persona-only slice test), `projectId` is null and only
+> WORKSPACE-scoped items are eligible, never an error on the injection path.
+
+> **No per-item token ceiling (v1, gap-5 remediation).** An earlier draft carried a
+> `d2os.knowledge.per-item-token-ceiling` config intending to truncate/skip oversized items at envelope
+> insertion; it was never read. It is **removed**, not implemented: truncating an item's content after
+> retrieval already computed its `content_hash` would diverge the injected bytes from the snapshotted
+> hash, breaking the injection-snapshot/replay contract (FR-006/FR-007). Prompt growth is instead bounded
+> by the item-count cap (`max-items-per-operation`) plus per-case token budget accounting — sufficient
+> for NFR-7 without touching the byte-for-byte replay guarantee.
 
 **Rationale**: Deterministic filters do the isolation/governance work; similarity only ranks
 within the already-entitled set — so a ranking bug can mis-order but never widen entitlement.

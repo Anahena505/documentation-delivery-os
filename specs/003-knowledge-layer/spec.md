@@ -169,7 +169,8 @@ rubric-score delta, attributable to that item.
 - The influence evaluation is requested for an item never injected anywhere → the metric is reported as not
   yet measurable rather than fabricated.
 - A candidate is rejected at the D4 gate after Curator redaction → it stays project-confidential and
-  non-promotable, and the rejection with its reason is recorded; no partially-promoted state leaks.
+  non-promotable, and the rejection with its reason is recorded; no partially-promoted state leaks. The
+  rejection is terminal in v1 (no resubmit loop) and the case is not re-harvested — see FR-013 v1 scope.
 
 ## Requirements *(mandatory)*
 
@@ -225,6 +226,13 @@ rubric-score delta, attributable to that item.
 - **FR-013**: System MUST record the outcome of every promotion gate, and when any gate rejects a candidate
   the System MUST leave it project-confidential and non-promotable and record the rejection with its reason,
   with no partially-promoted state.
+  - **v1 scope (accepted design, gap-3): REJECT is terminal — there is no rework/resubmit loop.** A
+    candidate rejected at any gate (PREFILTER, CURATION, or D4) moves to the terminal `REJECTED` state and
+    stays there as an immutable audit record; the state machine exposes no path back into the pipeline, and
+    `CaptureService` is idempotent per case (it will not re-harvest a case that already has a candidate), so
+    a rejected lesson is not re-capturable for that case in v1. This is intentional: the rejection and its
+    reason are the auditable outcome. A remediation loop (re-redact after a fixable D4 rejection, or a fresh
+    capture revision) is a deferred enhancement, not a v1 requirement.
 - **FR-014**: When a KnowledgeItem is deprecated, System MUST make it ineligible for retrieval into new
   persona operations while leaving in-flight operations that already snapshotted it unaffected.
 - **FR-015**: On deprecation, System MUST flag every past OperationExecution whose injection snapshot
@@ -287,8 +295,16 @@ rubric-score delta, attributable to that item.
   redaction recorded as a new version; a candidate that fails any gate is published zero times.
 - **SC-006**: No capture candidate becomes cross-project promotable without passing all three gates in order
   (default-deny holds 100% of the time in the demonstration set).
-- **SC-007**: Deprecating a KnowledgeItem removes it from new-operation retrieval and flags 100% of the past
-  executions whose snapshots referenced it, while altering zero historical snapshots or outputs.
+- **SC-007**: Deprecating a KnowledgeItem removes it from new-operation retrieval and flags 100% of the
+  past executions whose snapshots referenced it **at deprecation time**, while altering zero historical
+  snapshots or outputs.
+  - **v1 scope (accepted limitation, gap-2):** flagging is point-in-time — the deprecation transaction's
+    insert-select flags exactly the executions committed when it runs. An in-flight operation whose
+    envelope was built before deprecation but whose execution commits after it is not flagged (and FR-014
+    permits that operation to keep its snapshot), so the "100%" is exhaustive for the single-node,
+    single-threaded demonstration set but is not a real-time invariant under concurrent deprecation.
+    History is never rewritten either way (FR-016 holds unconditionally). A reconciliation sweep
+    (idempotent re-run of the flag insert-select) is the deferred path to eventual 100% — see research R8.
 - **SC-008**: For a chosen KnowledgeItem, the system emits a knowledge-influence value equal to the measured
   with-minus-without rubric-score delta, and reports not-yet-measurable for an item never injected.
 - **SC-009**: Every Phase 1 and Phase 2 success criterion (byte-identical replay, zero cross-workspace leaks,
@@ -321,7 +337,11 @@ rubric-score delta, attributable to that item.
 - The **knowledge-influence KPI** is computed against the same rubric machinery used to gate persona
   operations; it is reported for stewardship and does not itself gate delivery.
 - Team and deployment assumptions are unchanged from Phases 1 and 2 (small team, single-region cloud, logical
-  per-workspace isolation).
+  per-workspace isolation). In particular, deployment is **single-node** in v1: the case-end capture
+  trigger's check-then-start (and the harvest's per-case idempotency) serialize correctly on one node but
+  are not guarded by a DB/Flowable business-key uniqueness constraint, so a multi-node deployment could
+  double-start capture. Accepted for v1 (gap-4); the D4 wait-releaser is nonetheless made duplicate-tolerant
+  now, and full multi-node uniqueness backstops are deferred to the horizontal-scale workstream (research R6).
 
 ## Dependencies
 

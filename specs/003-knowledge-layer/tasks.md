@@ -49,8 +49,13 @@ are all stated inline. Sub-bullets under a task are ordered steps — do them to
   - Confirm `implementation project(':tenancy')`, `project(':catalog')`, `project(':casecore')`, `project(':persona')` (SPI type only), `project(':observability')` (KPI emit), plus `spring-boot-starter-data-jpa` and `spring-boot-starter-web`.
   - Confirm **no** `project(':knowledge')` dependency appears in `persona/build.gradle` (acyclic — R1).
 - [ ] T003 [P] Add knowledge config keys under `d2os.knowledge` in `app/src/main/resources/application.yml`.
-  - Keys: `max-items-per-operation` (default `5`, R10), a per-item token ceiling, and the embed-model id.
+  - Keys: `max-items-per-operation` (default `5`, R10) and `retrieval-budget-ms`; the embed model/dimensions
+    live under `d2os.ai-gateway`.
   - Confirm `KnowledgeRetrievalService` reads `max-items-per-operation` for its cap.
+  - > **Deviation (accepted, gap-5):** the earlier `per-item-token-ceiling` key was **removed**, not
+    > implemented — nothing read it, and truncating item content post-retrieval would diverge from the
+    > `content_hash` the snapshot pins, breaking replay (FR-006/FR-007). Prompt growth is bounded by the
+    > item-count cap + per-case token budget accounting instead (research R10).
 - [ ] T004 [P] Ensure the `knowledge` module is component-scanned by the app.
   - ↳ File: `app/src/main/java/com/d2os/app/D2osApplication.java` — confirm `com.d2os.knowledge` is scanned/imported the same way other BC modules are, and the `KnowledgeProvider` SPI bean is wired (see T020).
 
@@ -139,13 +144,18 @@ attached same-tx, and replay reproduces the output byte-for-byte after the items
 
 - [ ] T019 [US1] Verify `KnowledgeRetrievalService` (the Open Host Service, R10).
   - ↳ File: `knowledge/src/main/java/com/d2os/knowledge/KnowledgeRetrievalService.java`.
-  - Confirm one SQL query with mandatory predicates `workspace_id=:ws`, `status='PUBLISHED'`, scope ancestor-or-equal (via `KnowledgeScope`), tag overlap with (operation tags ∩ persona profile), ordered by vector cosine similarity to the operation-context embedding (one gateway `embed` call), capped at `d2os.knowledge.max-items-per-operation`. Deterministic filters bound entitlement; similarity only ranks within the entitled set.
+  - Confirm one SQL query with mandatory predicates `workspace_id=:ws`, `status='PUBLISHED'`, `embed_model=`(current query model — R3 re-index contract, gap-1), scope ancestor-or-equal (via `KnowledgeScope`), tag overlap with (operation tags ∩ persona profile), ordered by vector cosine similarity to the operation-context embedding (one gateway `embed` call), capped at `d2os.knowledge.max-items-per-operation`. Deterministic filters bound entitlement; similarity only ranks within the entitled set.
+  - > **Guard (accepted, gap-1):** ranking only rows whose `embed_model` equals the model that produced the
+    > query vector keeps cosine comparisons within one vector space. A model/dimension swap drops prior-model
+    > items out of retrieval (visible: fewer/zero results) rather than mis-ranking; re-embed to restore. No
+    > in-place re-embed job in v1 (research R3).
 - [ ] T020 [US1] Verify `EmbeddingIndexer` and SPI wiring.
   - ↳ Files: `knowledge/src/main/java/com/d2os/knowledge/EmbeddingIndexer.java`; the `KnowledgeProvider` impl bean.
   - Confirm items are embedded via the gateway `embed` op at publish/new-version time and `embed_model` is recorded on the row (R3); confirm the knowledge module implements `KnowledgeProvider` delegating to `KnowledgeRetrievalService`, wired as the persona SPI bean in `app` (keeps the dependency acyclic).
 - [ ] T021 [US1] Verify the envelope knowledge slot.
   - ↳ File: `persona/src/main/java/com/d2os/persona/ExecutionEnvelopeBuilder.java`.
   - Confirm it calls `KnowledgeProvider.retrieve(...)`, renders returned items into the envelope as **delimited data** (same T1-a framing as submission text), and passes the resolved `(itemId, key, version, content, contentHash)` list with stable `position` order to the recorder.
+  - Confirm the query's `projectId` is resolved from the case's `case_instance → feature → project_version` chain (best-effort; null when unresolvable) so **PROJECT-scoped knowledge is reachable in the real op path** (gap-6), not just via direct SPI calls (research R4/R10).
 - [ ] T022 [US1] Verify same-transaction snapshot write.
   - ↳ Files: `persona/src/main/java/com/d2os/persona/OperationExecutionRecorder.java`, `KnowledgeInjectionSnapshot.java`, `KnowledgeInjectionSnapshotRepository.java`.
   - Confirm one `knowledge_injection_snapshot` row per injected item (with `position`, `content_hash`) is written in the **same transaction** as the `operation_execution` row (FR-006, R5) — never a second transaction.
@@ -202,6 +212,10 @@ provenance; any gate rejection publishes nothing.
 - [ ] T033 [US2] Verify `PromotionGateService` (default-deny order + publish/reject).
   - ↳ File: `knowledge/.../capture/PromotionGateService.java` (+ `GateOrderViolationException`, `D4AuthorizationException`).
   - Confirm: gate-order violations throw `GateOrderViolationException` → **409**; each gate writes a `PromotionGateRecord`; D4 APPROVE publishes a `KnowledgeItem` version (scope raised to approved level, `source_candidate_id` provenance) via `EmbeddingIndexer`, writing Decision + AuditEntry same-tx; REJECT leaves candidate confidential/non-promotable with `rejection_stage`+`rejection_reason`; D4 actor must hold workspace-owner role and differ from the redaction actor, else `D4AuthorizationException` → **403** (FR-009/013/019, non-self-satisfiable).
+  - > **Accepted design (gap-3): REJECT is terminal.** `CaptureCandidate.reject(...)` moves to the terminal
+    > `REJECTED` state with no transition back into the pipeline, and `CaptureService` will not re-harvest a
+    > case that already has a candidate — so a rejected lesson is not re-capturable for that case in v1. A
+    > re-redact/resubmit remediation loop is a deferred enhancement (spec FR-013 v1 scope).
 - [ ] T034 [US2] Verify the capture BPMN process (R6, standalone).
   - ↳ File: `orchestration/src/main/resources/processes/knowledge-capture.bpmn20.xml`.
   - Confirm flow: capture service task → pre-filter service task → Curator persona service task (redaction draft) → **D4 user task** (workspace owner) → publish/reject service task. Initiation workflow (`initiation-v2.bpmn20.xml`) is untouched.
@@ -213,6 +227,12 @@ provenance; any gate rejection publishes nothing.
   - ↳ Files: `orchestration/.../CaptureStepDelegate.java`, `PreFilterDelegate.java`, `CuratorStepDelegate.java`, `CaptureWaitReleaserImpl.java` (+ `knowledge/.../capture/CaptureWaitReleaser.java`).
   - Confirm `CuratorStepDelegate` produces the redaction via `RedactionService` (v1: deterministically — see the deviation below), `PreFilterDelegate` invokes `SensitivityPreFilter`, and the wait-releaser resumes the process on D4 completion.
   - > **Deviation (accepted):** the Curator step does **not** run through `PersonaExecutionService`. That path resolves definitions from the case's *frozen* `CaseDefinitionSnapshot`, which pins only the initiation suite — so `knowledge-curator` is not resolvable there and the snapshot is immutable (Principle I). v1 produces the redaction deterministically (the pre-filter already excluded PII); the Curator persona/playbook/rubric/prompt are still seeded (T037) for provenance and future snapshot inclusion.
+  - > **Accepted limitation (gap-4): single-node capture start/release.** `CaseDeliveredKnowledgeTrigger`'s
+    > check-then-start has no business-key uniqueness backstop, so multi-node deployment could double-start
+    > capture (single-node safe per spec Assumptions). Robustness applied now: `CaptureWaitReleaserImpl`
+    > releases the D4 wait with `list()` over every matching instance rather than `singleResult()` (which
+    > throws on duplicates) — a stray duplicate degrades to a harmless redundant trigger. Full multi-node
+    > uniqueness (DB/Flowable business-key guard) is deferred to the horizontal-scale workstream (research R6).
 - [ ] T037 [US2] Verify the Curator governance assets are seeded (FR-021, Principle I).
   - ↳ File: `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` (v3 seed set).
   - Confirm it publishes: Knowledge Curator PersonaDefinition (with the knowledge profile = allowed tags/domains as a content-level field), one curation Playbook, one curation Rubric, and the Curator prompt set — as new published DefinitionAssets with provenance.
@@ -244,6 +264,11 @@ affected executions flagged; snapshots/outputs byte-unchanged; a flagged executi
   - ↳ Files: `knowledge/src/main/java/com/d2os/knowledge/DeprecationService.java` (+ `AlreadyDeprecatedException.java`).
   - Confirm one transaction: set item version `status=DEPRECATED` (+ `deprecated_at`, required `deprecation_reason`), audited governance action; then insert one `knowledge_affected_execution` per distinct `operation_execution` referencing the deprecated version via an insert-select over `knowledge_injection_snapshot` (using `idx_injection_snapshot_item`); never touch snapshots/outputs. Re-deprecate → `AlreadyDeprecatedException` → **409**.
   - > **Deviation (accepted):** the governance record is an immutable **`AuditEntry`**, not a `decision` row. The V4 `decision` table is `NOT NULL case_instance_id` + CHECK-constrains `decision_type` to the case D-gates (`D1..D4`); a knowledge-item deprecation is bound to no single case and is not a D-gate, so it cannot be a `decision` row. The `audit_entry` stream is the correct system-of-record vehicle for FR-016.
+  - > **Accepted limitation (gap-2): point-in-time flagging.** The `NOT EXISTS`-idempotent insert-select
+    > flags executions committed when it runs; an in-flight execution committing its snapshot *after* the
+    > sweep is not flagged (FR-014 permits it to keep its snapshot). SC-007's 100% is exhaustive for the
+    > single-node ITs, not a concurrent real-time invariant. A reconciliation sweep re-running the idempotent
+    > insert-select is the deferred path to eventual completeness (spec SC-007 v1 scope, research R8).
 - [ ] T041 [US3] Verify DEPRECATED items are excluded from new retrieval.
   - ↳ File: `knowledge/.../KnowledgeRetrievalService.java` (T019).
   - Confirm the `status='PUBLISHED'` predicate excludes deprecated versions and that in-flight, already-built envelopes keep their snapshotted versions (FR-014).
@@ -302,6 +327,9 @@ runs under the same rubric version, a `knowledge_influence` sample == score delt
 - [ ] T050 Run the quickstart.md success checklist as the phase exit gate.
   - Command: `docker run --rm -v "$PWD":/w -w /w gradle:8.10-jdk21 gradle :app:test` (or `./gradlew :app:test`).
   - Confirm all six new suites green + startup seed verification: `GET /api/v1/knowledge/items` shows the five fixtures (workspace-scoped, project-scoped matching + non-matching, DEPRECATED) with correct statuses, and the Curator persona/playbook/rubric/prompt seeded.
+  - > **Note (accepted quick-win):** the full `:app:test` spins up ~20 Spring contexts and OOMs at the JVM
+    > default/-Xmx2g. The root `build.gradle` `test` task now sets `maxHeapSize = '4g'` (+ 1g metaspace) so
+    > the whole suite runs in one pass; individual suites still pass under smaller heaps.
 
 ---
 

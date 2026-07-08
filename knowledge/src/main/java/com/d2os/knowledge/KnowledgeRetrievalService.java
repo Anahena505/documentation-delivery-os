@@ -2,6 +2,7 @@ package com.d2os.knowledge;
 
 import com.d2os.persona.gateway.AiGatewayClient;
 import com.d2os.persona.gateway.EmbedRequest;
+import com.d2os.persona.gateway.EmbedResult;
 import com.d2os.persona.spi.KnowledgeProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -29,17 +30,26 @@ import java.util.UUID;
  * {@code DEPRECATED} items out of every NEW-operation retrieval the moment they are retired. In-flight
  * envelopes are unaffected — their injection snapshots are decoupled soft references pinned to the exact
  * {@code (key, version)}, so already-snapshotted knowledge still replays byte-identically (FR-016).
+ *
+ * <p>Embed-model isolation (research R3, re-index contract): cosine distance is only meaningful between
+ * vectors from the SAME embedding model. The query embeds the operation context through the gateway and
+ * ranks only items whose {@code embed_model} equals the model that just produced the query vector — an
+ * {@code embed_model = ?} predicate. After a model/dimension swap, items embedded under the prior model
+ * fall out of the entitled set (retrieval returns fewer/zero items — a visible, safe signal to re-index)
+ * instead of being mis-ranked against a foreign-space query vector. No in-place re-embed job ships in v1.
  */
 @Service
 public class KnowledgeRetrievalService implements KnowledgeProvider {
 
     // projectId is bound as text and cast (?::uuid) at both sites so a null binds cleanly — an untyped
     // JDBC null in "? IS NOT NULL" would otherwise make Postgres unable to infer the parameter type.
+    // embed_model pins ranking to the current model's vector space (research R3 re-index contract).
     private static final String RETRIEVAL_SQL = """
             SELECT id, workspace_id, key, version, content, content_hash
               FROM knowledge_item
              WHERE workspace_id = ?
                AND status = 'PUBLISHED'
+               AND embed_model = ?
                AND (scope_level = 'WORKSPACE'
                     OR (scope_level = 'PROJECT' AND ?::uuid IS NOT NULL AND scope_ref = ?::uuid))
                AND tags && ?::text[]
@@ -70,9 +80,12 @@ public class KnowledgeRetrievalService implements KnowledgeProvider {
         contextTerms.addAll(profileTags);
         String contextString = String.join(" ", contextTerms);
 
-        float[] embedding = aiGatewayClient.embed(new EmbedRequest(contextString)).vector();
+        EmbedResult embedded = aiGatewayClient.embed(new EmbedRequest(contextString));
+        // The model string that produced this query vector, in the exact shape EmbeddingIndexer stored on
+        // each row ("modelId:modelVersion") — so the embed_model predicate ranks only same-space vectors.
+        String queryEmbedModel = embedded.modelId() + ":" + embedded.modelVersion();
 
-        String vectorLiteral = PgLiterals.vector(embedding);
+        String vectorLiteral = PgLiterals.vector(embedded.vector());
         String tagsLiteral = PgLiterals.textArray(profileTags);
         String projectIdLiteral = query.projectId() == null ? null : query.projectId().toString();
 
@@ -86,6 +99,7 @@ public class KnowledgeRetrievalService implements KnowledgeProvider {
                         rs.getString("content"),
                         rs.getString("content_hash")),
                 query.workspaceId(),
+                queryEmbedModel,
                 projectIdLiteral,
                 projectIdLiteral,
                 tagsLiteral,
