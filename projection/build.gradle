@@ -1,0 +1,33 @@
+// Graph Projection + Analytics (Phase 7, the 14th module — plan.md Project Structure, research
+// R1-R9). Owns the derived, rebuildable graph read model: `graph_node`/`graph_edge` plus the
+// projector's own bookkeeping tables. Sole writer of those five tables (Principle III), enforced
+// both by module boundary (nothing else depends on this module) and by DB grant (the
+// `d2os_projector` role — see V28 migration and ProjectorDataSourceConfig).
+//
+// Depends on:
+//   - tenancy    : WorkspaceContext / RLS session binding + the WorkspaceAwareDataSource/
+//                  WorkspaceRlsBinder conventions this module's second datasource follows
+//                  (T007) — same convention as every other module.
+//   - casecore   : case_instance / event_outbox / decision read models the projector consumes
+//                  (read-only — this module writes none of them).
+//   - artifacts  : artifact / artifact_revision / execution_package / trace_link / dependency
+//                  read models (read-only).
+//   - knowledge  : knowledge_item / knowledge_injection_snapshot read models (read-only).
+//   - governance : gate_instance + the Phase 5 GateEventPayload outbox contract (read-only).
+//
+// spring-boot-starter-web is required alongside Thymeleaf for the traceability panel's MVC
+// dispatch (same reasoning as studio/build.gradle); spring-boot-starter-data-jpa backs the
+// read-side GraphNode/GraphEdge/... entities (T007) — the write path uses a dedicated JdbcTemplate
+// against the `d2os_projector`-bound datasource instead of a second EntityManagerFactory (T007,
+// documented in ProjectorDataSourceConfig).
+dependencies {
+    implementation project(':tenancy')
+    implementation project(':casecore')
+    implementation project(':artifacts')
+    implementation project(':knowledge')
+    implementation project(':governance')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+}

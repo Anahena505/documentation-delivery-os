@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Graph Traceability</title>
+</head>
+<body>
+<h1>Graph Traceability</h1>
+<p>Self-contained lineage/impact panel (tasks.md T018, US2, research R7) &mdash; workspace-scoped
+   multi-hop TRACES_TO / DEPENDS_ON queries over the projected graph's live generation. This page
+   lives entirely inside the <code>projection</code> module: no Catalog Studio dependency.</p>
+
+<form method="get" th:action="@{/projection/traceability}">
+    <p>
+        <label>Node type
+            <select name="nodeType">
+                <option value=""></option>
+                <option value="CASE" th:selected="${nodeType == 'CASE'}">CASE</option>
+                <option value="SUBMISSION" th:selected="${nodeType == 'SUBMISSION'}">SUBMISSION</option>
+                <option value="ARTIFACT_REVISION" th:selected="${nodeType == 'ARTIFACT_REVISION'}">ARTIFACT_REVISION</option>
+                <option value="REQUIREMENT" th:selected="${nodeType == 'REQUIREMENT'}">REQUIREMENT</option>
+                <option value="PACKAGE" th:selected="${nodeType == 'PACKAGE'}">PACKAGE</option>
+                <option value="DEFINITION_VERSION" th:selected="${nodeType == 'DEFINITION_VERSION'}">DEFINITION_VERSION</option>
+                <option value="KNOWLEDGE_ITEM_VERSION" th:selected="${nodeType == 'KNOWLEDGE_ITEM_VERSION'}">KNOWLEDGE_ITEM_VERSION</option>
+                <option value="OPERATION_EXECUTION" th:selected="${nodeType == 'OPERATION_EXECUTION'}">OPERATION_EXECUTION</option>
+                <option value="GATE" th:selected="${nodeType == 'GATE'}">GATE</option>
+                <option value="FEATURE" th:selected="${nodeType == 'FEATURE'}">FEATURE</option>
+                <option value="PROJECT" th:selected="${nodeType == 'PROJECT'}">PROJECT</option>
+            </select>
+        </label>
+        <label>Natural key <input type="text" name="naturalKey" th:value="${naturalKey}"/></label>
+    </p>
+    <p>
+        <label>Relation
+            <select name="relation">
+                <option value="TRACES_TO" th:selected="${relation == 'TRACES_TO'}">TRACES_TO</option>
+                <option value="DEPENDS_ON" th:selected="${relation == 'DEPENDS_ON'}">DEPENDS_ON</option>
+            </select>
+        </label>
+        <label>Direction
+            <select name="direction">
+                <option value="DOWNSTREAM" th:selected="${direction == 'DOWNSTREAM'}">DOWNSTREAM</option>
+                <option value="UPSTREAM" th:selected="${direction == 'UPSTREAM'}">UPSTREAM</option>
+                <option value="BOTH" th:selected="${direction == 'BOTH'}">BOTH</option>
+            </select>
+        </label>
+        <label>Max depth <input type="number" name="maxDepth" th:value="${maxDepth}" min="1" max="50"/></label>
+    </p>
+    <button type="submit">Search</button>
+</form>
+
+<div th:if="${searched and !found}">
+    <p><strong>Not found</strong> &mdash; no <span th:text="${nodeType}">nodeType</span> node with natural key
+       <span th:text="${naturalKey}">naturalKey</span> exists in this workspace's live graph.</p>
+</div>
+
+<div th:if="${found}">
+    <h2>Root</h2>
+    <p>
+        <strong th:text="${result.root().label()}">label</strong>
+        (<span th:text="${result.root().nodeType()}">type</span>)
+        &mdash;
+        <a th:if="${result.root().owningResourcePath() != null}"
+           th:href="${result.root().owningResourcePath()}">owning resource</a>
+        <a th:href="@{'/api/v1/graph/nodes/' + ${result.root().id()}}">node detail (JSON)</a>
+    </p>
+
+    <h2>Lineage paths</h2>
+    <p th:if="${#lists.isEmpty(result.paths())}">No paths found for this relation/direction.</p>
+    <ul>
+        <li th:each="path : ${result.paths()}">
+            <ol>
+                <li th:each="hop : ${path}">
+                    depth <span th:text="${hop.depth()}">1</span> &mdash;
+                    <em th:text="${hop.edgeType()}">EDGE_TYPE</em> &rarr;
+                    <span th:text="${hop.node().label()}">label</span>
+                    (<span th:text="${hop.node().nodeType()}">type</span>)
+                    <a th:if="${hop.node().owningResourcePath() != null}"
+                       th:href="${hop.node().owningResourcePath()}">owning resource</a>
+                    <a th:href="@{'/api/v1/graph/nodes/' + ${hop.node().id()}}">node detail (JSON)</a>
+                </li>
+            </ol>
+        </li>
+    </ul>
+
+    <p th:if="${result.truncated()}">
+        Truncated at the node budget (<code>d2os.projection.node-budget</code>) &mdash; next page token:
+        <code th:text="${result.nextPageToken()}">token</code>
+    </p>
+</div>
+</body>
+</html>

@@ -1,10 +1,12 @@
 package com.d2os.app;
 
 import com.d2os.app.support.StubAiGatewayClient;
+import com.d2os.projection.Projector;
 import com.d2os.testsupport.ContainerFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -14,6 +16,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -47,6 +50,11 @@ class LeakageSuiteIT {
     @LocalServerPort int port;
     @Autowired TestRestTemplate rest;
     @Autowired DataSource dataSource;
+    @Autowired
+    @Qualifier("projectorDataSource")
+    DataSource projectorDataSource;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired Projector projector;
 
     private static final UUID ALPHA = UUID.randomUUID();
     private static final UUID BETA = UUID.randomUUID();
@@ -63,6 +71,12 @@ class LeakageSuiteIT {
         registry.add("spring.datasource.url", () -> jdbcUrl);
         registry.add("spring.datasource.username", () -> "d2os_app");
         registry.add("spring.datasource.password", () -> "d2os_app");
+        // T020 (Phase 7 US2): this class now also exercises Projector/the graph tables, which need
+        // the d2os_projector-bound second datasource (ProjectorDataSourceConfig, T007) pointed at
+        // the same Testcontainers instance — every other full-context Phase-7 IT (RebuildEquivalenceIT,
+        // PayloadSufficiencyIT, ProjectionIdempotencyIT) already sets this; this class predates that
+        // module and had not needed it until now.
+        registry.add("spring.datasource.projector.url", () -> jdbcUrl);
         registry.add("d2os.storage.endpoint", () -> ContainerFixtures.MINIO.getS3URL());
         registry.add("d2os.storage.access-key", ContainerFixtures.MINIO::getUserName);
         registry.add("d2os.storage.secret-key", ContainerFixtures.MINIO::getPassword);
@@ -135,6 +149,108 @@ class LeakageSuiteIT {
         ResponseEntity<Map> crossRead = rest.exchange(url("/api/v1/cases/" + alphaCase),
                 HttpMethod.GET, new HttpEntity<>(beta), Map.class);
         assertEquals(404, crossRead.getStatusCode().value(), "BETA must not read ALPHA's case");
+    }
+
+    /**
+     * T020 (Phase 7 US2, SC-005): traceability/node queries never leak across workspaces, at any
+     * traversal depth. Projects a small real CASE -&gt; SUBMISSION lineage into ALPHA via the same
+     * {@link Projector} path {@code TraceabilityQueryIT} exercises, then asserts BETA gets a clean
+     * 404 from both graph endpoints for ALPHA's node id (API level) AND that a direct SQL query
+     * bound to BETA's RLS session returns ZERO rows for that id even when the query ALSO carries an
+     * explicit {@code workspace_id = ALPHA} predicate (SQL level) &mdash; proving RLS itself blocks
+     * the row regardless of what an explicit predicate elsewhere in the query claims, exactly the
+     * "RLS + explicit predicate both hold" defense-in-depth {@link
+     * com.d2os.projection.query.TraceabilityQueryService} relies on (Principle IV).
+     */
+    @Test
+    void graphQueriesDoNotLeakAcrossWorkspacesRegardlessOfDepth() throws Exception {
+        UUID submissionId = UUID.randomUUID();
+        UUID caseId = UUID.randomUUID();
+        try (Connection c = dataSource.getConnection()) {
+            exec(c, "SET app.workspace_id = '" + ALPHA + "'");
+            ins(c, "INSERT INTO problem_submission (id, workspace_id, form_data, created_by) "
+                            + "VALUES (?, ?, '{}'::jsonb, ?)",
+                    submissionId, ALPHA, "test");
+            ins(c, "INSERT INTO case_instance (id, workspace_id, feature_id, submission_id, case_type_key, "
+                            + "case_type_version, mode, status, token_budget, created_by) "
+                            + "VALUES (?, ?, ?, ?, 'initiation', '1.0.0', 'mutating', 'Delivered', 1000, 'test')",
+                    caseId, ALPHA, alphaFeatureId, submissionId);
+            ins(c, "INSERT INTO event_outbox (id, workspace_id, aggregate_type, aggregate_id, event_type, payload) "
+                            + "VALUES (?, ?, 'case_instance', ?, 'Delivered', '{}'::jsonb)",
+                    UUID.randomUUID(), ALPHA, caseId);
+            ins(c, "INSERT INTO trace_link (id, workspace_id, from_type, from_id, to_type, to_id, link_type) "
+                            + "VALUES (?, ?, 'case_instance', ?, 'problem_submission', ?, 'DERIVES_FROM')",
+                    UUID.randomUUID(), ALPHA, caseId, submissionId);
+        }
+        projector.sweep(); // sweeps every active workspace (ALPHA and BETA both), builds generation 0
+
+        UUID caseNodeId = jdbcTemplate.queryForObject(
+                "SELECT id FROM graph_node WHERE workspace_id = ? AND generation = 0 "
+                        + "AND node_type = 'CASE' AND natural_key = ?",
+                UUID.class, ALPHA, caseId.toString());
+
+        // --- API level ---
+        HttpHeaders betaHeaders = headers(BETA);
+        ResponseEntity<Map> crossTraceability = rest.exchange(
+                url("/api/v1/graph/traceability?nodeType=CASE&naturalKey=" + caseId
+                        + "&relation=TRACES_TO&direction=BOTH&maxDepth=20"),
+                HttpMethod.GET, new HttpEntity<>(betaHeaders), Map.class);
+        assertEquals(404, crossTraceability.getStatusCode().value(),
+                "BETA must not be able to start a traceability query from ALPHA's CASE node (SC-005)");
+
+        ResponseEntity<Map> crossNode = rest.exchange(url("/api/v1/graph/nodes/" + caseNodeId),
+                HttpMethod.GET, new HttpEntity<>(betaHeaders), Map.class);
+        assertEquals(404, crossNode.getStatusCode().value(),
+                "BETA must not be able to read ALPHA's graph_node by id (SC-005)");
+
+        HttpHeaders alphaHeaders = headers(ALPHA);
+        ResponseEntity<Map> ownTraceability = rest.exchange(
+                url("/api/v1/graph/traceability?nodeType=CASE&naturalKey=" + caseId
+                        + "&relation=TRACES_TO&direction=BOTH&maxDepth=20"),
+                HttpMethod.GET, new HttpEntity<>(alphaHeaders), Map.class);
+        assertEquals(200, ownTraceability.getStatusCode().value(), "ALPHA must see its own graph");
+
+        // --- SQL level: RLS + the explicit workspace_id predicate both hold ---
+        assertEquals(1L, countGraphNodeVisible(ALPHA, ALPHA, caseNodeId),
+                "ALPHA sees its own graph_node row (session + predicate agree)");
+        assertEquals(0L, countGraphNodeVisible(BETA, BETA, caseNodeId),
+                "BETA sees zero of ALPHA's graph_node rows under its own session+predicate");
+        assertEquals(0L, countGraphNodeVisible(BETA, ALPHA, caseNodeId),
+                "RLS alone blocks the row even when the query's OWN predicate claims workspace_id = ALPHA "
+                        + "while the session is bound to BETA (SC-005, Principle IV)");
+        assertTrue(countGraphEdgesTouchingNode(ALPHA, caseNodeId) > 0,
+                "ALPHA has a real projected edge (CASE -DERIVES_FROM-> SUBMISSION) to compare against");
+        assertEquals(0L, countGraphEdgesTouchingNode(BETA, caseNodeId),
+                "BETA must see ZERO of ALPHA's graph_edge rows regardless of traversal depth (SC-005)");
+    }
+
+    /** Bound to {@code sessionWs}'s RLS session; the query ALSO carries an explicit {@code workspace_id = predicateWs} predicate. */
+    private long countGraphNodeVisible(UUID sessionWs, UUID predicateWs, UUID nodeId) throws Exception {
+        try (Connection c = dataSource.getConnection()) {
+            exec(c, "SET app.workspace_id = '" + sessionWs + "'");
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT count(*) FROM graph_node WHERE id = ? AND workspace_id = ?")) {
+                ps.setObject(1, nodeId);
+                ps.setObject(2, predicateWs);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? rs.getLong(1) : 0L;
+                }
+            }
+        }
+    }
+
+    private long countGraphEdgesTouchingNode(UUID sessionWs, UUID nodeId) throws Exception {
+        try (Connection c = dataSource.getConnection()) {
+            exec(c, "SET app.workspace_id = '" + sessionWs + "'");
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT count(*) FROM graph_edge WHERE from_node = ? OR to_node = ?")) {
+                ps.setObject(1, nodeId);
+                ps.setObject(2, nodeId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? rs.getLong(1) : 0L;
+                }
+            }
+        }
     }
 
     private String submitOpenAndStart(HttpHeaders h, UUID feature) {
