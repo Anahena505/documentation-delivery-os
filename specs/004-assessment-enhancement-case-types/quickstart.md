@@ -78,3 +78,12 @@ AuditGrant, Knowledge* suites — all green with three case types active.
 | 4 | SC-005 | MutatingGuardIT |
 | 5 | SC-006, SC-007 | ConditionalArtifactIT, SchemaFreezeIT |
 | 6 | SC-008 | existing suites |
+
+## Execution status
+
+All six suites above are implemented and `gradle compileTestJava` passes cleanly. They could not be
+*run* in this delivery's sandbox: Testcontainers 1.19.8's pinned docker-java client negotiates Docker
+API 1.32, and this environment's dockerd (29.3.1) requires a minimum of API 1.40 — a client/server
+version mismatch, not a missing-Docker problem. `ArchitectureRulesTest` (no Docker required) passes.
+Recommend running the full suite in CI or a Testcontainers-compatible Docker environment before
+treating this phase as verified end to end.

@@ -35,7 +35,7 @@ public class IntakeSubmissionLookup implements SubmissionLookup {
             String caseTypeKey = confirmed && s.getConfirmedCaseType() != null
                     ? s.getConfirmedCaseType().toLowerCase(Locale.ROOT)
                     : s.getClassificationCaseType();
-            return new SubmissionInfo(s.getId(), s.getWorkspaceId(), caseTypeKey, confirmed);
+            return new SubmissionInfo(s.getId(), s.getWorkspaceId(), caseTypeKey, confirmed, s.getFormData());
         });
     }
 }

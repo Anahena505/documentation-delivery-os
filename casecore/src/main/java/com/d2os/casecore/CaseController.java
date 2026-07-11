@@ -17,7 +17,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.UUID;
 
 /** Case API — open + read (contracts/api.yaml — cases tag). T026 + GET /cases/{id} (US1). */
@@ -87,6 +90,30 @@ public class CaseController {
                         "case_instance", id, "BASELINE_RESOLVED")
                 .orElseThrow(() -> new NoSuchElementException("case " + id + " has no resolved baseline"));
         return ResponseEntity.ok(BaselineResponse.from(kase, entry, objectMapper, jdbcTemplate));
+    }
+
+    /**
+     * GET /cases/{id}/required-artifacts — the pinned expected-artifact set: BASE (from the case
+     * type's template dependencies) plus CONDITIONAL (from the conditional-artifacts DMN, T032), each
+     * with {@code fulfilled} computed against the Case's actually-produced artifacts (T034, US5).
+     */
+    @GetMapping("/{id}/required-artifacts")
+    public ResponseEntity<List<Map<String, Object>>> requiredArtifacts(@PathVariable UUID id) {
+        caseRepository.findById(id).orElseThrow(() -> new NoSuchElementException("case " + id));
+        CaseDefinitionSnapshot snapshot = snapshotRepository.findByCaseInstanceId(id)
+                .orElseThrow(() -> new NoSuchElementException("case " + id + " has no pinned snapshot"));
+
+        Set<String> producedKinds = Set.copyOf(jdbcTemplate.queryForList(
+                "SELECT DISTINCT artifact_type FROM artifact WHERE case_instance_id = ?", String.class, id));
+
+        List<Map<String, Object>> result = caseService.requiredArtifacts(snapshot).stream()
+                .map(entry -> {
+                    Map<String, Object> withFulfilled = new java.util.LinkedHashMap<>(entry);
+                    withFulfilled.put("fulfilled", producedKinds.contains(entry.get("artifactKind")));
+                    return withFulfilled;
+                })
+                .toList();
+        return ResponseEntity.ok(result);
     }
 
     private Object snapshotEntries(UUID caseId) {

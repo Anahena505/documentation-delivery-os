@@ -521,6 +521,25 @@ public class CatalogSeedLoader implements ApplicationRunner {
 
         seedAssessment();
         seedEnhancement();
+        seedConditionalArtifacts();
+    }
+
+    // ---- US5 Conditional artifacts (T030-T031, research R6): zero-schema-change extension --------
+
+    /**
+     * Binds {@code dmn/conditional-artifacts.dmn} (T030) as a published RuleDefinition, same
+     * {@code decisionKey}/{@code engine} shape as {@code rule.case-type-classification} above, plus
+     * the {@code template.dpia} TemplateDefinition its one seeded rule row currently references.
+     * Nothing in any case type's {@code dependsOn} names {@code rule.conditional-artifacts} — it is
+     * evaluated directly by key ({@code ConditionalArtifactService}, T032), not resolved through a
+     * case type's snapshot dependency list, since it applies across case types rather than belonging
+     * to one.
+     */
+    private void seedConditionalArtifacts() {
+        seed("rule", "conditional-artifacts", V4, """
+                {"decisionKey":"conditionalArtifacts","engine":"flowable-dmn"}""");
+        seed("template", "dpia", V4, """
+                {"name":"Data Protection Impact Assessment","kind":"DPIA","producedBy":null}""");
     }
 
     // ---- US2 Assessment (T014-T016, research R2/R7): read-only case type, catalog content only -----
