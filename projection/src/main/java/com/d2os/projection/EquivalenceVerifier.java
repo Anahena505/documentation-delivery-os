@@ -40,9 +40,10 @@ import java.util.UUID;
  * OPERATION_EXECUTION}, since {@code ConsistencyService#writeConflictEdge} — the only real
  * trace_link writer — links two of those; {@code dependency} itself is still writer-less at the
  * application layer, see {@link Projector}'s javadoc, but checked here in lockstep with the
- * projector/rebuild pair). Edge types: {@code BELONGS_TO}, {@code PRODUCED}, {@code GATED_BY},
- * {@code TRACES_TO}/{@code DERIVES_FROM}/{@code SATISFIES}, {@code DEPENDS_ON}. See {@link
- * Projector}'s javadoc for why {@code PACKAGE}/{@code KNOWLEDGE_ITEM_VERSION}/{@code
+ * projector/rebuild pair) plus, as of Phase 6 US4 (T025), {@code KNOWLEDGE_ITEM_VERSION} (every
+ * {@code knowledge_injection_snapshot} row). Edge types: {@code BELONGS_TO}, {@code PRODUCED},
+ * {@code GATED_BY}, {@code TRACES_TO}/{@code DERIVES_FROM}/{@code SATISFIES}, {@code DEPENDS_ON},
+ * {@code INJECTED_INTO}. See {@link Projector}'s javadoc for why {@code PACKAGE}/{@code
  * DEFINITION_VERSION} are still deferred — this class only checks what the projector/rebuild pair
  * actually populate; checking a type nothing builds would either always spuriously fail (candidate
  * empty, truth non-empty) or always trivially pass (both empty), neither of which is a meaningful
@@ -213,6 +214,17 @@ public class EquivalenceVerifier {
                     .add(row.get("to_id").toString());
         }
 
+        // KNOWLEDGE_ITEM_VERSION + OPERATION_EXECUTION (Phase 6 US4, T025) — mirrors NodeEdgeMapper#mapInjectionSnapshot.
+        List<Map<String, Object>> injections = jdbcTemplate.queryForList(
+                "SELECT operation_execution_id, knowledge_item_key, knowledge_item_version "
+                        + "FROM knowledge_injection_snapshot WHERE workspace_id = ?", workspaceId);
+        for (Map<String, Object> row : injections) {
+            String naturalKey = row.get("knowledge_item_key") + ":" + row.get("knowledge_item_version");
+            byType.computeIfAbsent(NodeEdgeMapper.NODE_KNOWLEDGE_ITEM_VERSION, t -> new TreeSet<>()).add(naturalKey);
+            byType.computeIfAbsent(NodeEdgeMapper.NODE_OPERATION_EXECUTION, t -> new TreeSet<>())
+                    .add(row.get("operation_execution_id").toString());
+        }
+
         return byType;
     }
 
@@ -286,6 +298,19 @@ public class EquivalenceVerifier {
                     nodeTypeForSourceTable((String) row.get("to_type")), row.get("to_id").toString(),
                     row.get("id").toString());
             byType.computeIfAbsent(NodeEdgeMapper.EDGE_DEPENDS_ON, t -> new TreeSet<>()).add(key);
+        }
+
+        // INJECTED_INTO: KNOWLEDGE_ITEM_VERSION -> OPERATION_EXECUTION, sourceRef = snapshot id (self-id,
+        // Phase 6 US4, T025) — mirrors NodeEdgeMapper#mapInjectionSnapshot.
+        List<Map<String, Object>> injections = jdbcTemplate.queryForList(
+                "SELECT id, operation_execution_id, knowledge_item_key, knowledge_item_version "
+                        + "FROM knowledge_injection_snapshot WHERE workspace_id = ?", workspaceId);
+        for (Map<String, Object> row : injections) {
+            String itemKey = row.get("knowledge_item_key") + ":" + row.get("knowledge_item_version");
+            String key = edgeIdentity(NodeEdgeMapper.NODE_KNOWLEDGE_ITEM_VERSION, itemKey,
+                    NodeEdgeMapper.NODE_OPERATION_EXECUTION, row.get("operation_execution_id").toString(),
+                    row.get("id").toString());
+            byType.computeIfAbsent(NodeEdgeMapper.EDGE_INJECTED_INTO, t -> new TreeSet<>()).add(key);
         }
 
         return byType;

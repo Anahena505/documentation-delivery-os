@@ -52,8 +52,14 @@ import java.util.UUID;
  * pair names only {@code case_instance}, {@code artifact_revision}, {@code gate_instance}, {@code
  * trace_link}); {@code KNOWLEDGE_ITEM_VERSION}/{@code INJECTED_INTO} (explicitly assigned
  * to Phase 6/US4 by tasks.md T025 — "ensure the projector materializes INJECTED_INTO edges..."
- * implies it is NOT yet wired); {@code DEFINITION_VERSION} (no task in Phase 3-6 names a concrete
- * source table for it).
+ * implies it is NOT yet wired, until this same phase wires it below); {@code DEFINITION_VERSION}
+ * (no task in Phase 3-6 names a concrete source table for it).
+ *
+ * <h3>{@code knowledge_injection_snapshot}/{@code INJECTED_INTO} — wired (Phase 6 US4, T025)</h3>
+ * Full-table rescan (no outbox event exists for injection-snapshot creation), same convention as
+ * {@link #scanTraceLinks}/{@link #scanDependencies}. Read via raw JDBC against the table directly —
+ * this module has no Gradle dependency on {@code persona} (the table's owning module); the same
+ * posture already used for every other cross-module source table this class reads.
  *
  * <h3>{@code dependency}/{@code DEPENDS_ON} — wired, still writer-less (Phase 5 US3, T021)</h3>
  * {@link NodeEdgeMapper#mapDependency} was implemented in Phase 2 as dead code because no
@@ -309,6 +315,7 @@ public class Projector {
         scanTraceLinks(workspaceId, generation, nodes, edges);
         scanArtifactRevisions(workspaceId, generation, nodes, edges);
         scanDependencies(workspaceId, generation, nodes, edges);
+        scanInjectionSnapshots(workspaceId, generation, nodes, edges);
 
         return new ReadBatch(nodes, edges, gaps, watermark, newWatermark);
     }
@@ -384,6 +391,25 @@ public class Projector {
                     (String) row.get("to_type"), (UUID) row.get("to_id"), (String) row.get("dep_type"),
                     toOffsetDateTime(row.get("created_at")));
             NodeEdgeMapper.MappingResult result = mapper.mapDependency(fact, generation);
+            nodes.addAll(result.nodes());
+            edges.addAll(result.edges());
+        }
+    }
+
+    /** Phase 6 US4 (T025) — see class javadoc's "knowledge_injection_snapshot/INJECTED_INTO — wired" section. */
+    private void scanInjectionSnapshots(UUID workspaceId, int generation, List<GraphNode> nodes, List<GraphEdge> edges) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, operation_execution_id, knowledge_item_id, knowledge_item_key, "
+                        + "       knowledge_item_version, position, created_at "
+                        + "FROM knowledge_injection_snapshot WHERE workspace_id = ?",
+                workspaceId);
+        for (Map<String, Object> row : rows) {
+            NodeEdgeMapper.InjectionSnapshotFact fact = new NodeEdgeMapper.InjectionSnapshotFact(workspaceId,
+                    (UUID) row.get("id"), (UUID) row.get("operation_execution_id"),
+                    (UUID) row.get("knowledge_item_id"), (String) row.get("knowledge_item_key"),
+                    ((Number) row.get("knowledge_item_version")).intValue(),
+                    ((Number) row.get("position")).intValue(), toOffsetDateTime(row.get("created_at")));
+            NodeEdgeMapper.MappingResult result = mapper.mapInjectionSnapshot(fact, generation);
             nodes.addAll(result.nodes());
             edges.addAll(result.edges());
         }
