@@ -2,13 +2,17 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-web'
-    // JWT workspace-claim resolution (T067). Self-contained HMAC signing — this monolith has no
-    // external OIDC/OAuth2 identity provider yet, so spring-boot-starter-oauth2-resource-server
-    // (which expects an issuer-uri/jwk-set-uri) would be the wrong shape; jjwt lets JwtService both
-    // issue and verify tokens against one shared secret.
+    // JWT workspace-claim resolution (T067). Self-contained HMAC signing for the legacy/default
+    // posture — jjwt lets JwtService both issue and verify tokens against one shared secret.
     implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
+    // 008 US5 (T043): OIDC resource-server for real per-user identity + roles. This is ADDITIVE and
+    // OPT-IN — the OidcSecurityConfig chain activates only when D2OS_OIDC_ISSUER_URI is set; with it
+    // unset (the default, and every existing test) the prior workspace-scoping posture is unchanged,
+    // so the starter's presence on the classpath does not alter default boot behavior.
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
 
     // US3 (T023): @SchedulerLock on RetentionVerificationJob's scheduled sweep. The annotation lives
     // in shedlock-spring, needed on this module's own compile classpath; the LockProvider bean is

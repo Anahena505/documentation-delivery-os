@@ -48,6 +48,16 @@ spring:
     multipart:
       max-file-size: ${D2OS_ATTACHMENT_MAX_BYTES:20971520}
       max-request-size: 25MB
+  # 008 US5 (T045): OIDC resource-server verification. OPT-IN — both default EMPTY, which keeps the
+  # OidcSecurityConfig chain inactive and the prior workspace-scoping posture in force (so existing
+  # tests are unaffected). Set D2OS_OIDC_ISSUER_URI (and optionally the JWKS uri) in a real
+  # deployment to verify RS256/ES256 access tokens against the IdP and carry user identity + roles.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${D2OS_OIDC_ISSUER_URI:}
+          jwk-set-uri: ${D2OS_OIDC_JWKS_URI:}
 
 # Flowable embedded engine (R1) — async executor on so wait-states survive restart (NFR-4).
 # database-schema-update=true lets Flowable auto-manage its OWN internal ACT_*/FLW_* engine
@@ -80,6 +90,11 @@ d2os:
       # real deployment — true only in app/src/test/resources/application.properties, so existing
       # integration tests (authored before JWT support existed) keep passing unchanged.
       allow-header-workspace-fallback: ${D2OS_ALLOW_HEADER_WORKSPACE_FALLBACK:false}
+    # 008 US5: opt-in OIDC resource-server auth. false (default) keeps the workspace-scoping posture
+    # (SecurityConfig); true activates OidcSecurityConfig (per-user identity + roles from the IdP).
+    # Turning it on requires D2OS_OIDC_ISSUER_URI (spring.security.oauth2.* above) to be set.
+    oidc:
+      enabled: ${D2OS_OIDC_ENABLED:false}
   ai-gateway:
     # Provider-agnostic; the gateway is the sole call site (AS-5, Principle II).
     provider: ${D2OS_AI_PROVIDER:anthropic}
@@ -251,5 +266,8 @@ management:
 
 server:
   port: 8080
+  # 008 US4 (T037): drain in-flight requests on SIGTERM so a rolling restart / scale-down does not
+  # cut active work; readiness flips to OUT_OF_SERVICE first (probes above) so traffic stops arriving.
+  shutdown: graceful
   servlet:
     context-path: /

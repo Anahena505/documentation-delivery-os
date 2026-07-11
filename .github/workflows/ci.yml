@@ -57,3 +57,67 @@ jobs:
           name: build-reports
           path: '**/build/reports/**'
           if-no-files-found: warn
+
+  # 008 US7 (T061 / enhancement E11): make the constitution's contract-first rule a CHECKED guarantee.
+  # springdoc (T060) serves the live OpenAPI at /v3/api-docs; openapi-diff compares it to the
+  # checked-in specs/**/contracts/*.yaml and fails the build on BREAKING drift (additive changes pass).
+  # The app boots against a Postgres service container so the full controller surface is present.
+  contract:
+    name: OpenAPI contract conformance (openapi-diff)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: d2os
+          POSTGRES_USER: d2os_owner
+          POSTGRES_PASSWORD: d2os_owner
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U d2os_owner" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      # Boot the app (springdoc serves /v3/api-docs) with the datasource pointed at the service DB,
+      # then capture the live spec. Env mirrors application.yml's ${...} keys; the owner role runs
+      # Flyway and the app connects likewise for this spec-only run.
+      - name: Generate live OpenAPI spec
+        env:
+          D2OS_DB_URL: jdbc:postgresql://localhost:5432/d2os
+          D2OS_DB_OWNER_USER: d2os_owner
+          D2OS_DB_OWNER_PASSWORD: d2os_owner
+          D2OS_DB_APP_USER: d2os_owner
+          D2OS_DB_APP_PASSWORD: d2os_owner
+          D2OS_DB_PROJECTOR_USER: d2os_owner
+          D2OS_DB_PROJECTOR_PASSWORD: d2os_owner
+          D2OS_STORAGE_SECRET_KEY: ci-not-a-secret
+          D2OS_JWT_SECRET: ci-only-signing-key-0123456789ABCDEF0123456789ABCDEF
+        run: |
+          ./gradlew :app:bootRun > bootrun.log 2>&1 &
+          APP_PID=$!
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/v3/api-docs -o live-openapi.json; then break; fi
+            sleep 3
+          done
+          kill "$APP_PID" 2>/dev/null || true
+          test -s live-openapi.json  # fail the job if the spec was never produced
+      # Compare the live spec to each checked-in contract; --fail-on-incompatible makes BREAKING
+      # drift a hard failure while additive evolution passes.
+      - name: openapi-diff vs checked-in contracts
+        run: |
+          shopt -s globstar nullglob
+          for contract in specs/**/contracts/*.yaml; do
+            echo "::group::diff $contract"
+            docker run --rm -v "$PWD:/work" -w /work openapitools/openapi-diff:latest \
+              --fail-on-incompatible "$contract" live-openapi.json || exit 1
+            echo "::endgroup::"
+          done

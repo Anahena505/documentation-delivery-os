@@ -1,5 +1,12 @@
 apply plugin: 'org.springframework.boot'
 
+// US4 (T036): build a versioned, layered OCI image via Cloud Native Buildpacks (no hand-maintained
+// Dockerfile). `gradle :app:bootBuildImage` produces d2os/app:<project.version>; the image build
+// itself needs a Docker daemon and runs in CI.
+tasks.named('bootBuildImage') {
+    imageName = "d2os/app:${project.version}"
+}
+
 dependencies {
     implementation project(':catalog')
     implementation project(':tenancy')
@@ -40,6 +47,10 @@ dependencies {
     // US2 (T017): JSON structured logs with workspace_id/case_id/trace_id in MDC (logback-spring.xml).
     // Non-BOM library — pinned.
     implementation 'net.logstash.logback:logstash-logback-encoder:8.0'
+
+    // US7 (T060): springdoc emits the live OpenAPI at /v3/api-docs so CI (openapi-diff) can check the
+    // running controllers against the checked-in specs/**/contracts/*.yaml. Non-BOM — pinned.
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-api:2.6.0'
 
     testImplementation project(':test-support')
     testImplementation platform('software.amazon.awssdk:bom:2.28.29')

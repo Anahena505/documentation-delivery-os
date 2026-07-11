@@ -224,7 +224,7 @@ raises the lag gauge and fires the shipped alert.
   iterates cases, leave it unlocked and add a code comment explaining it is naturally partitioned (do
   NOT put a single global lock on a per-case beat — that would serialize all heartbeats). Acceptance:
   compiles; comment or lock present as appropriate.
-- [ ] T035 [US3] Create `app/src/test/java/com/d2os/app/ShedLockMultiInstanceIT.java` — a Testcontainers
+- [X] T035 [US3] Create `app/src/test/java/com/d2os/app/ShedLockMultiInstanceIT.java` — a Testcontainers
   IT that simulates two schedulers against one Postgres (e.g. acquire the same lock name from two
   `LockProvider` instances) and asserts only one holds the lock per window. Follow an existing IT's
   `@DynamicPropertySource` container setup. Acceptance: compiles (`:app:compileTestJava`); runs in CI.
@@ -242,10 +242,10 @@ required secret fails startup.
 
 ### Implementation
 
-- [ ] T036 [US4] In `app/build.gradle`, configure the Spring Boot `bootBuildImage` task with
+- [X] T036 [US4] In `app/build.gradle`, configure the Spring Boot `bootBuildImage` task with
   `imageName = "d2os/app:${project.version}"`. Acceptance: `/opt/gradle/bin/gradle :app:bootBuildImage --dry-run`
   resolves the task (a full image build needs a Docker daemon and runs in CI).
-- [ ] T037 [P] [US4] In `app/src/main/resources/application.yml`, add graceful shutdown
+- [X] T037 [P] [US4] In `app/src/main/resources/application.yml`, add graceful shutdown
   (`server.shutdown: graceful`, `spring.lifecycle.timeout-per-shutdown-phase: 30s`). Acceptance:
   compiles/boots.
 - [X] T038 [P] [US4] Create `deploy/helm/Chart.yaml` (name `d2os`, version from project). Acceptance:
@@ -261,7 +261,7 @@ required secret fails startup.
 - [X] T041 [P] [US4] Create `deploy/helm/templates/configmap.yaml` and `deploy/helm/templates/secret.yaml`
   from the values in T039 (Secret keyed for external-secrets injection; no literal secret values).
   Acceptance: valid YAML; no plaintext credentials committed.
-- [ ] T042 [US4] Confirm fail-loud on a missing required secret: verify (and add a short comment in
+- [X] T042 [US4] Confirm fail-loud on a missing required secret: verify (and add a short comment in
   `application.yml` next to `D2OS_DB_APP_PASSWORD` / `D2OS_JWT_SECRET` if not already clear) that these
   have NO default, so startup fails when unset — matching the existing datasource convention.
   Acceptance: with the env var unset, a boot attempt fails with a clear message (this is already the
@@ -281,22 +281,22 @@ record names the user + role.
 
 ### Implementation
 
-- [ ] T043 [US5] In `tenancy/build.gradle` add
+- [X] T043 [US5] In `tenancy/build.gradle` add
   `implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'`. Acceptance:
   compiles.
-- [ ] T044 [US5] Rewrite `tenancy/src/main/java/com/d2os/tenancy/security/SecurityConfig.java`: replace
+- [X] T044 [US5] Rewrite `tenancy/src/main/java/com/d2os/tenancy/security/SecurityConfig.java`: replace
   `anyRequest().permitAll()` with `anyRequest().authenticated()` EXCEPT `/actuator/health/**` and
   `/actuator/prometheus` permitted; enable `oauth2ResourceServer(oauth2 -> oauth2.jwt(...))`. Keep CSRF
   disabled for the stateless API. Acceptance: `:tenancy:compileJava` passes; existing security intent
   preserved for health/metrics.
-- [ ] T045 [US5] In `application.yml` add
+- [X] T045 [US5] In `application.yml` add
   `spring.security.oauth2.resourceserver.jwt.issuer-uri: ${D2OS_OIDC_ISSUER_URI:}` and
   `jwk-set-uri: ${D2OS_OIDC_JWKS_URI:}`. Acceptance: parses.
-- [ ] T046 [US5] Create `tenancy/src/main/java/com/d2os/tenancy/security/RolesJwtConverter.java` — a
+- [X] T046 [US5] Create `tenancy/src/main/java/com/d2os/tenancy/security/RolesJwtConverter.java` — a
   `Converter<Jwt, AbstractAuthenticationToken>` mapping the `roles` (or `groups`) claim to
   `SimpleGrantedAuthority` (prefix `ROLE_`). Register it in `SecurityConfig` (T044). Acceptance:
   compiles; a token with `roles:["catalog-owner"]` yields authority `ROLE_catalog-owner`.
-- [ ] T047 [US5] Create `tenancy/src/main/java/com/d2os/tenancy/security/AuthenticatedPrincipal.java` —
+- [X] T047 [US5] Create `tenancy/src/main/java/com/d2os/tenancy/security/AuthenticatedPrincipal.java` —
   a small helper reading the current `SecurityContext` to expose `userId()` (JWT `sub`) and
   `roles()`. Acceptance: compiles; unit-testable with a mocked `SecurityContext`.
 - [ ] T048 [US5] Update `tenancy/src/main/java/com/d2os/tenancy/security/WorkspaceContextFilter.java`:
@@ -304,7 +304,7 @@ record names the user + role.
   the local HS256 `JwtService`; REMOVE the `X-Workspace-Id` header-fallback branch and the
   `allowHeaderWorkspaceFallback` property usage. Keep binding `WorkspaceContext` exactly as today.
   Acceptance: compiles; health paths still bypass (unchanged `shouldNotFilter`).
-- [ ] T049 [US5] Create the audit-actor columns migration as the next unused Flyway version (**V31**) at
+- [X] T049 [US5] Create the audit-actor columns migration as the next unused Flyway version (**V31**) at
   `casecore/src/main/resources/db/migration/V31__audit_actor.sql`: add nullable `actor_user_id text`
   and `actor_role text` to the audit/decision tables that record gate approvals, rejections, reopens,
   and package grants (per data-model.md §2). Nullable so pre-existing rows remain valid. Acceptance:
@@ -383,14 +383,14 @@ results; DR rehearsal restores the real schema and passes integrity checks.
 
 ### Implementation
 
-- [ ] T060 [US7] In `app/build.gradle` add
+- [X] T060 [US7] In `app/build.gradle` add
   `implementation 'org.springdoc:springdoc-openapi-starter-webmvc-api:2.6.0'`. Acceptance: compiles;
   `/v3/api-docs` served when running.
-- [ ] T061 [US7] Add an openapi-diff step to `.github/workflows/ci.yml` (from T012): boot the app (or
+- [X] T061 [US7] Add an openapi-diff step to `.github/workflows/ci.yml` (from T012): boot the app (or
   use a generated static `/v3/api-docs`), then run an openapi-diff action/CLI comparing the live spec
   to the checked-in `specs/**/contracts/*.yaml`; fail the job on breaking drift. Acceptance: YAML valid;
   step present.
-- [ ] T062 [P] [US7] Ensure the two benchmark ITs are `@Tag("slow")` and included by `nightly.yml`
+- [X] T062 [P] [US7] Ensure the two benchmark ITs are `@Tag("slow")` and included by `nightly.yml`
   (T013): check `app/src/test/java/com/d2os/app/TraceabilityBenchmarkIT.java` and the
   `ResolutionBenchmarkIT` carry the tag; add if missing. Acceptance: `:app:compileTestJava` passes.
 - [X] T063 [P] [US7] Create `ops/dr-rehearsal.sh` — a script that stands up the real Flyway schema on a
