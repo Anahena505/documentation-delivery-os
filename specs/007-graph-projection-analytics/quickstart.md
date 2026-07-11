@@ -91,3 +91,22 @@ service interface) — recorded, not silently absorbed.
 | 6 | FR-012/015 | ProjectionIdempotencyIT |
 | 7 | SC-006 | InfluenceDashboardIT |
 | 8 | SC-008 | latency benchmark [slow] |
+
+## Execution status
+
+All eight suites and the underlying `projection` module code (Projector, RebuildJob,
+EquivalenceVerifier, CycleDetector, InfluenceAnalyticsService, and their controllers) are
+implemented; `gradle :app:compileJava :app:compileTestJava` is clean across all 15 modules, and
+`ArchitectureRulesTest` (no Docker needed) passes in full, including the new
+`projectionIsSoleWriterOfGraphTables` rule (T030). The Testcontainers-backed IT suites themselves
+could not be executed in this sandbox (Testcontainers 1.19.8's pinned docker-java client negotiates
+Docker API 1.32 against this environment's dockerd 29.3.1, minimum API 1.40 — a client/server
+version mismatch, not a missing-Docker problem) — same standing limitation documented throughout
+this delivery chain (specs 002/004/005/006). The Phase 1–6 regression claim (T031) is an audit, not
+a live run: every pre-existing Projector/RebuildJob-driving IT was checked by hand for
+`dependency`/`knowledge_injection_snapshot` seeding that could interact with this phase's newly-wired
+scans — none found. `TraceabilityBenchmarkIT` (T029, tagged `slow`) is scoped and documented as
+described in tasks.md's T029 entry — a 50k-node/200k-edge direct graph seed for query latency, a
+3,000-case real-row seed for the two operational-lag targets, not literal 50k real rows either way.
+Recommend running the full suite (including `:app:slowTest`) in CI or a Testcontainers-compatible
+Docker environment before treating this phase as verified end to end.
