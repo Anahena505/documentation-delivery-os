@@ -96,3 +96,17 @@ AuditGrant, Knowledge*, CaseRouting/Guard suites — all green with gates active
 | 6 | SC-007 | ops/dr-drill.md (documented results) |
 | 7 | FR-019 / Phase 7 dependency | GateFlowIT (payload assertions) |
 | 8 | SC-008 | existing suites |
+
+## Execution status
+
+Scenarios 1-2 (US1/US2, Phases 1-4) were built earlier in this delivery chain and previously
+documented as implemented-but-unverified (no Docker in this sandbox). Scenarios 3-5 and 7-8
+(Phases 5-7/9) close out this pass the same way: implemented, `gradle compileTestJava` passes cleanly,
+`ArchitectureRulesTest` (no Docker needed) passes — but the Testcontainers-backed IT suites themselves
+could not run here (Testcontainers 1.19.8's pinned docker-java client negotiates Docker API 1.32; this
+sandbox's dockerd is 29.3.1, minimum API 1.40 — a client/server version mismatch). Scenario 6 (DR
+drill, SC-007) is further along than "unverified": the WAL-archiving config and runbook exist, but the
+drill itself has never been executed at all (no persistent environment here to run it against) — see
+`ops/dr-drill.md` and `quickstart-results.md` for the explicit not-run status. Recommend running the
+full suite in CI or a Testcontainers-compatible Docker environment, and executing a real DR drill in a
+persistent environment, before treating this phase as verified end to end.

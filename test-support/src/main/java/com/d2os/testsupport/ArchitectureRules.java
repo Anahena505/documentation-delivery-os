@@ -120,6 +120,23 @@ public final class ArchitectureRules {
                     + "(AD-8, FR-018) — only orchestration delegates and top-level gate services may");
     }
 
+    /**
+     * {@code governance} stays engine-agnostic (Phase 5 plan.md Structure Decision, Phase 9 T048):
+     * no class in the module may depend on Flowable directly. Engine coupling is confined to
+     * {@code orchestration}'s bridge classes ({@code GateTaskBridge}, {@code TimerEscalationDelegate},
+     * {@code ReopenDmnPortImpl}, {@code EngineGateReleasePortImpl}) — each implements a port
+     * {@code governance} defines ({@code EngineGateReleasePort}, {@code ReopenDmnPort}) or reaches
+     * INTO governance's services from the engine side, never the other way around.
+     */
+    public static ArchRule governanceHasNoFlowableDependency() {
+        return noClasses()
+            .that().resideInAPackage("com.d2os.governance..")
+            .should().dependOnClassesThat().resideInAnyPackage("org.flowable..")
+            .because("governance is engine-agnostic by design — engine coupling is confined to "
+                    + "orchestration's bridge classes, which implement governance-owned SPI ports "
+                    + "rather than governance reaching into Flowable directly (plan.md Structure Decision)");
+    }
+
     public static void checkAll(JavaClasses importedClasses) {
         personaNoPeerCalls().check(importedClasses);
         onlyGatewayCallsProviders().check(importedClasses);
@@ -127,5 +144,6 @@ public final class ArchitectureRules {
         personaDoesNotDependOnAttachmentStorage().check(importedClasses);
         personaExecutionBeansHoldNoMutableState().check(importedClasses);
         personaExecutionMachineryNeverRecursesIntoAnotherPersona().check(importedClasses);
+        governanceHasNoFlowableDependency().check(importedClasses);
     }
 }
