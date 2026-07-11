@@ -24,9 +24,9 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Purpose**: Build/config scaffolding for Phase 2 — no business logic yet. No `loadTest`-style task applies to this phase (N/A — Phase 2's load posture is reused unchanged).
 
-- [ ] T001 [P] Add Phase 4 config keys (if any) to `app/src/main/resources/application.yml`: `d2os.intake.classification.hit-policy` (UNIQUE), `d2os.intake.conditional-artifacts.hit-policy` (COLLECT), `d2os.casecore.mutating-guard.enabled: true`
-- [ ] T002 [P] Register the two new BPMN resource locations (`processes/assessment-v1.bpmn20.xml`, `processes/enhancement-v1.bpmn20.xml`) and two new DMN resource locations (`dmn/case-type-classification.dmn`, `dmn/conditional-artifacts.dmn`) with the Flowable engine config in `orchestration/src/main/resources/` deployment scan (research R1, R7)
-- [ ] T003 [P] Scaffold the `CatalogSeedLoader` **v4** seed pass (idempotent, type-aware, published/checksummed DefinitionAssets) with empty Assessment/Enhancement seed groups in `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` (research R1)
+- [X] T001 [P] Add Phase 4 config keys (if any) to `app/src/main/resources/application.yml`: `d2os.intake.classification.hit-policy` (UNIQUE), `d2os.intake.conditional-artifacts.hit-policy` (COLLECT), `d2os.casecore.mutating-guard.enabled: true`
+- [X] T002 [P] Register the two new BPMN resource locations (`processes/assessment-v1.bpmn20.xml`, `processes/enhancement-v1.bpmn20.xml`) and two new DMN resource locations (`dmn/case-type-classification.dmn`, `dmn/conditional-artifacts.dmn`) with the Flowable engine config in `orchestration/src/main/resources/` deployment scan (research R1, R7)
+- [X] T003 [P] Scaffold the `CatalogSeedLoader` **v4** seed pass (idempotent, type-aware, published/checksummed DefinitionAssets) with empty Assessment/Enhancement seed groups in `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` (research R1)
 
 ---
 
@@ -34,10 +34,10 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Purpose**: The two column-only migrations plus the shared guard/capability infrastructure every story depends on. MUST complete before any US phase. (Following Phase 1, all V15–V16 schema lands here; per-story logic follows.)
 
-- [ ] T004 Add `feature.aggregate_version bigint NOT NULL DEFAULT 0` and `feature.active_mutating_case_id uuid NULL` columns (no new table; existing RLS policy/grants untouched) in `tenancy/src/main/resources/db/migration/V15__feature_mutating_guard.sql` (research R3, FR-012)
-- [ ] T005 Add `problem_submission` columns `proposed_case_type text NULL`, `confirmed_case_type text NULL`, `classification_status text NOT NULL DEFAULT 'PROPOSED'`, `classification_overridden boolean NOT NULL DEFAULT false` (no new table) in `intake/src/main/resources/db/migration/V16__case_type_classification.sql` (research R5, FR-019)
-- [ ] T006 Implement `MutatingCaseGuard.acquire(featureId, expectedVersion, caseId)` and `.release(caseId)` as single guarded UPDATEs (`SET active_mutating_case_id=:caseId, aggregate_version=aggregate_version+1 WHERE id=:id AND aggregate_version=:expected AND active_mutating_case_id IS NULL`; zero rows ⇒ conflict; release `WHERE active_mutating_case_id=:caseId`) in `casecore/src/main/java/com/d2os/casecore/MutatingCaseGuard.java` (research R3, FR-012/013)
-- [ ] T007 Plumb the case-type capability flags (`mutating: true|false`, artifact-kind allowlist) from `CaseTypeDefinition` into the pinned `CaseDefinitionSnapshot` so the write path and the guard read them from the frozen snapshot in `casecore/src/main/java/com/d2os/casecore/CaseService.java` (research R2/R3, Principle I)
+- [X] T004 Add `feature.aggregate_version bigint NOT NULL DEFAULT 0` and `feature.active_mutating_case_id uuid NULL` columns (no new table; existing RLS policy/grants untouched) in `tenancy/src/main/resources/db/migration/V15__feature_mutating_guard.sql` (research R3, FR-012)
+- [X] T005 Add `problem_submission` columns `proposed_case_type text NULL`, `confirmed_case_type text NULL`, `classification_status text NOT NULL DEFAULT 'PROPOSED'`, `classification_overridden boolean NOT NULL DEFAULT false` (no new table) in `intake/src/main/resources/db/migration/V16__case_type_classification.sql` (research R5, FR-019)
+- [X] T006 Implement `MutatingCaseGuard.acquire(featureId, expectedVersion, caseId)` and `.release(caseId)` as single guarded UPDATEs (`SET active_mutating_case_id=:caseId, aggregate_version=aggregate_version+1 WHERE id=:id AND aggregate_version=:expected AND active_mutating_case_id IS NULL`; zero rows ⇒ conflict; release `WHERE active_mutating_case_id=:caseId`) in `casecore/src/main/java/com/d2os/casecore/MutatingCaseGuard.java` (research R3, FR-012/013)
+- [X] T007 Plumb the case-type capability flags (`mutating: true|false`, artifact-kind allowlist) from `CaseTypeDefinition` into the pinned `CaseDefinitionSnapshot` so the write path and the guard read them from the frozen snapshot in `casecore/src/main/java/com/d2os/casecore/CaseService.java` (research R2/R3, Principle I)
 
 **Checkpoint**: V15–V16 columns, the guard service, and the snapshot capability flags are ready — user story phases can begin.
 
