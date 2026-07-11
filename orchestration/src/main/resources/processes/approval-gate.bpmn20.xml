@@ -27,15 +27,17 @@
     </userTask>
     <sequenceFlow id="a1" sourceRef="gate-decision" targetRef="end"/>
 
-    <!-- Non-interrupting boundary SLA timer — same Phase 6/US4 wiring-point rationale as review-gate. -->
+    <!-- Non-interrupting boundary SLA timer (T032/T033) — same TimerEscalationDelegate wiring as review-gate. -->
     <boundaryEvent id="gate-decision-sla-timer" attachedToRef="gate-decision" cancelActivity="false">
       <timerEventDefinition>
         <timeDuration>P3D</timeDuration>
       </timerEventDefinition>
     </boundaryEvent>
-    <sequenceFlow id="a2" sourceRef="gate-decision-sla-timer" targetRef="timer-escalation-marker"/>
-    <endEvent id="timer-escalation-marker"
-              name="SLA timer fired (advisory marker only — Phase 6/US4 TimerFiredHandler wiring point)"/>
+    <sequenceFlow id="a2" sourceRef="gate-decision-sla-timer" targetRef="timer-escalation"/>
+    <serviceTask id="timer-escalation" name="Record SLA Escalation"
+                 flowable:delegateExpression="${timerEscalationDelegate}"/>
+    <sequenceFlow id="a3" sourceRef="timer-escalation" targetRef="timer-escalation-marker"/>
+    <endEvent id="timer-escalation-marker" name="SLA timer handled"/>
 
     <endEvent id="end"/>
   </process>

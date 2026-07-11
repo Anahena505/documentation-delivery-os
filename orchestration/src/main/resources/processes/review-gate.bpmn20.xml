@@ -27,15 +27,15 @@
     variable contract). It WRITES `gateDecision` (set by GateService.decide's engine-release call),
     read back out by the caller's callActivity `flowable:out` mapping.
 
-    Non-interrupting boundary timer (research R4, Phase 6/US4 wiring point): advisory-SLA escalation
-    firing is NOT implemented in this phase (EscalationPolicyResolver/TimerFiredHandler are Phase 6,
-    T031-T037) — this boundary event exists now purely as the structural attach point R1/R4 describe,
-    so Phase 6 can wire a real handler onto it without a BPMN redeploy of every embedding workflow.
-    cancelActivity="false" is the load-bearing bit: the gate userTask is completely untouched when this
-    fires — no transition authority (Principle V), by construction, not discipline. The fixed P3D
-    duration is a placeholder matching the seeded `escalation-policy.default` step-0 duration
-    (CatalogSeedLoader) until EscalationPolicyResolver pins the gate's own escalation_policy_key/version
-    dynamically.
+    Non-interrupting boundary timer (research R4, Phase 6/US4, T032/T033): fires into
+    `timerEscalationDelegate` (TimerEscalationDelegate.java, orchestration), which calls governance's
+    `TimerFiredHandler` — records an `escalation_activation` row, notifies the resolved role, and emits
+    `GATE_ESCALATION_FIRED`. cancelActivity="false" is the load-bearing bit: the gate userTask is
+    completely untouched when this fires — no transition authority (Principle V), by construction, not
+    discipline; TimerFiredHandler's own code never mutates GateInstance status or the engine task
+    either. The fixed P3D duration is a placeholder matching the seeded `escalation-policy.default`
+    step-0 duration (CatalogSeedLoader) until a future pass pins the gate's own
+    escalation_policy_key/version dynamically into this timer's own duration expression.
   -->
   <process id="review-gate" name="Review Gate" isExecutable="true">
 
@@ -54,9 +54,11 @@
         <timeDuration>P3D</timeDuration>
       </timerEventDefinition>
     </boundaryEvent>
-    <sequenceFlow id="g2" sourceRef="gate-decision-sla-timer" targetRef="timer-escalation-marker"/>
-    <endEvent id="timer-escalation-marker"
-              name="SLA timer fired (advisory marker only — Phase 6/US4 TimerFiredHandler wiring point)"/>
+    <sequenceFlow id="g2" sourceRef="gate-decision-sla-timer" targetRef="timer-escalation"/>
+    <serviceTask id="timer-escalation" name="Record SLA Escalation"
+                 flowable:delegateExpression="${timerEscalationDelegate}"/>
+    <sequenceFlow id="g3" sourceRef="timer-escalation" targetRef="timer-escalation-marker"/>
+    <endEvent id="timer-escalation-marker" name="SLA timer handled"/>
 
     <endEvent id="end"/>
   </process>
