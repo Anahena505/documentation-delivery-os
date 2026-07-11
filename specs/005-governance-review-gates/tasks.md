@@ -24,10 +24,10 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Purpose**: Stand up the new `governance` module, dependencies, and config — no business logic yet.
 
-- [ ] T001 Create the `governance` Gradle module: add `governance/build.gradle` (Spring Boot, JPA, Flyway, Flowable deps mirroring `orchestration/build.gradle`) and register `include 'governance'` in `settings.gradle`; wire `app` to depend on `:governance` in `app/build.gradle`
-- [ ] T002 [P] Add `java-diff-utils` (deterministic delta reports, research R2) to `governance/build.gradle`
-- [ ] T003 [P] Add Phase 5 config keys to `app/src/main/resources/application.yml`: `d2os.governance.sla.default-durations` (fallback when an EscalationPolicy omits a per-step duration — policy value wins, R4), `d2os.governance.retention.default-years: 7` (NFR-5, R6) — audit-chain sealing is a fixed hourly interval per FR-013 (no cadence config key); notifications are in-app only in v1 (no delivery-channel config; no email/webhook, R4)
-- [ ] T004 [P] Scaffold `ops/dr-drill.md` (empty section headers: Backup regime, Restore procedure, RPO/RTO measurement, Results) to be filled in US6 (research R7, NFR-8)
+- [X] T001 Create the `governance` Gradle module: add `governance/build.gradle` (Spring Boot, JPA, Flyway, Flowable deps mirroring `orchestration/build.gradle`) and register `include 'governance'` in `settings.gradle`; wire `app` to depend on `:governance` in `app/build.gradle`
+- [X] T002 [P] Add `java-diff-utils` (deterministic delta reports, research R2) to `governance/build.gradle`
+- [X] T003 [P] Add Phase 5 config keys to `app/src/main/resources/application.yml`: `d2os.governance.sla.default-durations` (fallback when an EscalationPolicy omits a per-step duration — policy value wins, R4), `d2os.governance.retention.default-years: 7` (NFR-5, R6) — audit-chain sealing is a fixed hourly interval per FR-013 (no cadence config key); notifications are in-app only in v1 (no delivery-channel config; no email/webhook, R4)
+- [X] T004 [P] Scaffold `ops/dr-drill.md` (empty section headers: Backup regime, Restore procedure, RPO/RTO measurement, Results) to be filled in US6 (research R7, NFR-8)
 
 ---
 
@@ -35,15 +35,35 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Purpose**: All V17–V20 schema, the engine↔governance bridge, and the new definition-asset types every story depends on. MUST complete before any US phase.
 
-- [ ] T005 Create `gate_instance`, `impact_assessment`, `gate_reopen_candidate`, `escalation_activation`, `delta_report`, and `in_app_notification` tables (each with `workspace_id`, RLS policy, `d2os_app` grants; `escalation_activation` append-only per data-model) in `governance/src/main/resources/db/migration/V17__governance_gates.sql`
-- [ ] T006 [P] Create `audit_chain_segment` table (per-workspace chain: `segment_seq` UNIQUE per workspace, `segment_hash`/`prev_segment_hash`, RLS + grants, append-only — T6-b) in `casecore/src/main/resources/db/migration/V18__audit_hash_chain.sql`
-- [ ] T007 [P] Create `package_access_grant` table (`(workspace_id, package_id, role)` UNIQUE, `granted_by`, `revoked_at`, RLS + grants — T3-d) in `artifacts/src/main/resources/db/migration/V19__package_access_grants.sql`
-- [ ] T008 [P] Add `retention_years int NOT NULL DEFAULT 7` and `retention_policy_notes text` columns to `workspace` (columns only — NFR-5, R6) in `tenancy/src/main/resources/db/migration/V20__workspace_retention.sql`
-- [ ] T009 Implement `GateInstance` entity/repository (state machine OPEN→APPROVED/REJECTED/REGENERATING/REOPEN_CANDIDATE/REOPENED per data-model) in `governance/src/main/java/com/d2os/governance/GateInstance.java` + `GateInstanceRepository.java`
-- [ ] T010 Implement `GateTaskBridge` (engine userTask ↔ `GateInstance` sync: create the gate row when the gate callActivity spawns its user task, correlate `engine_task_id`, complete the task on decide — same coupling pattern as `PersonaStepDelegate`) in `orchestration/src/main/java/com/d2os/orchestration/GateTaskBridge.java` (research R1)
-- [ ] T011 Seed the two gate `SUBPROCESS` DefinitionAssets and the `ESCALATION_POLICY` DefinitionAsset as new `definition_asset` `type` values (content-level, not schema) via `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` (data-model Modified Entities; R1/R4)
+> **Renumbering note (as implemented)**: V17/V18/V19 were already taken by Phase 4 migrations
+> (`tenancy/V17__feature_mutating_guard.sql`, `intake/V18__case_type_classification.sql`,
+> `casecore/V19__decision_case_instance_optional.sql`) by the time this phase was implemented —
+> Flyway's `classpath:db/migration` namespace is global across every module (see
+> `app/src/main/resources/application.yml`). The four migrations below were renumbered to the actual
+> next-free integers, same relative order, shifted by +3: **V20** (governance), **V21** (casecore
+> audit chain), **V22** (artifacts grants), **V23** (tenancy retention columns). A fifth migration not
+> anticipated by this task list, `catalog/src/main/resources/db/migration/V24__governance_definition_types.sql`,
+> was also added — required for T011's `SUBPROCESS`/`ESCALATION_POLICY` seed rows to pass
+> `definition_asset`'s `type` CHECK constraint (V3, catalog-owned).
 
-**Checkpoint**: Phase 5 schema (V17–V20), gate aggregate, engine bridge, and definition-asset types ready — user story phases can begin.
+- [X] T005 Create `gate_instance`, `impact_assessment`, `gate_reopen_candidate`, `escalation_activation`, `delta_report`, and `in_app_notification` tables (each with `workspace_id`, RLS policy, `d2os_app` grants; `escalation_activation` append-only per data-model) in `governance/src/main/resources/db/migration/V20__governance_gates.sql`
+- [X] T006 [P] Create `audit_chain_segment` table (per-workspace chain: `segment_seq` UNIQUE per workspace, `segment_hash`/`prev_segment_hash`, RLS + grants, append-only — T6-b) in `casecore/src/main/resources/db/migration/V21__audit_hash_chain.sql` (also relaxes `decision.decision_type`'s CHECK constraint to admit the Phase 5 gate verbs — see T006 note below)
+- [X] T007 [P] Create `package_access_grant` table (`(workspace_id, package_id, role)` UNIQUE, `granted_by`, `revoked_at`, RLS + grants — T3-d) in `artifacts/src/main/resources/db/migration/V22__package_access_grants.sql`
+- [X] T008 [P] Add `retention_years int NOT NULL DEFAULT 7` and `retention_policy_notes text` columns to `workspace` (columns only — NFR-5, R6) in `tenancy/src/main/resources/db/migration/V23__workspace_retention.sql`
+- [X] T009 Implement `GateInstance` entity/repository (state machine OPEN→APPROVED/REJECTED/REGENERATING/REOPEN_CANDIDATE/REOPENED per data-model) in `governance/src/main/java/com/d2os/governance/GateInstance.java` + `GateInstanceRepository.java`
+- [X] T010 Implement `GateTaskBridge` (engine userTask ↔ `GateInstance` sync: create the gate row when the gate callActivity spawns its user task, correlate `engine_task_id`, complete the task on decide — same coupling pattern as `PersonaStepDelegate`) in `orchestration/src/main/java/com/d2os/orchestration/GateTaskBridge.java` (research R1) — **T010 scope note**: only the create-gate-row-on-userTask-create half is implemented (a Flowable `TaskListener`); it is not yet referenced by any BPMN (that wiring, plus the complete-task-on-decide half, is T012/T013/T014, Phase 3)
+- [X] T011 Seed the two gate `SUBPROCESS` DefinitionAssets and the `ESCALATION_POLICY` DefinitionAsset as new `definition_asset` `type` values (content-level, not schema) via `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` (data-model Modified Entities; R1/R4)
+
+**Checkpoint**: Phase 5 schema (V20–V23), gate aggregate, engine bridge, and definition-asset types ready — user story phases can begin.
+
+**T006 decision_type note (as implemented)**: `decision.decision_type` (casecore V4) was `CHECK
+(decision_type IN ('D1','D2','D3','D4'))`; `'D4'` already has a specific meaning (the Knowledge
+Curator promotion gate, `PromotionGateService`) so Phase 5 gate decisions do not reuse it. V21 drops
+and recreates the constraint to additionally admit `'GATE_APPROVE'`, `'GATE_REJECT'`,
+`'GATE_REQUEST_CHANGES'`, `'GATE_REOPEN'` — landed in casecore's own migration (the table's owning
+module), matching this repo's existing precedent of a table's owning module altering that table's
+constraints (e.g. `observability/V15` widening `kpi_sample`'s CHECK) rather than a cross-module
+migration from `governance`.
 
 ---
 

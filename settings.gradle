@@ -15,6 +15,9 @@ include 'observability'
 include 'replay'
 // Knowledge bounded context (Phase 3 — governed KnowledgeItem lifecycle + retrieval OHS)
 include 'knowledge'
+// Governance bounded context (Phase 5, BC-7 — review/approval gates, reopen policy, escalation,
+// audit hash-chaining support, retention/access governance)
+include 'governance'
 
 // Shared test support (Testcontainers fixtures, ArchUnit rules)
 include 'test-support'

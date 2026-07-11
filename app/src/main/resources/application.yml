@@ -148,6 +148,17 @@ d2os:
     bucket: ${D2OS_STORAGE_BUCKET:d2os-artifacts}
     access-key: ${D2OS_STORAGE_ACCESS_KEY:d2os}
     secret-key: ${D2OS_STORAGE_SECRET_KEY}
+  governance:
+    sla:
+      # Fallback advisory-SLA step duration (ISO-8601) used only when a pinned EscalationPolicy
+      # definition omits a per-step duration (research R4) — the policy value always wins when
+      # present. Advisory only: TimerFiredHandler never routes/decides a gate on firing (Q9).
+      default-durations: ${D2OS_GOVERNANCE_SLA_DEFAULT_DURATIONS:P3D}
+    retention:
+      # Workspace retention floor (NFR-5, R6) — mirrors the V20 workspace.retention_years DEFAULT 7.
+      # Configurable longer, never shorter; RetentionVerificationJob (Phase 7, US5) reads the
+      # per-workspace column, this key only seeds new workspaces / documents the enforced minimum.
+      default-years: ${D2OS_GOVERNANCE_RETENTION_DEFAULT_YEARS:7}
 
 server:
   port: 8080

@@ -38,6 +38,7 @@ public class CatalogSeedLoader implements ApplicationRunner {
     private static final String V2 = "2.0.0";
     private static final String V3 = "3.0.0";
     private static final String V4 = "4.0.0";
+    private static final String V5 = "5.0.0";
 
     /** One documentation persona of the Phase 2 suite (T011). */
     private record Persona(String key, String title, String charter, String artifact,
@@ -102,6 +103,7 @@ public class CatalogSeedLoader implements ApplicationRunner {
         seedPhase2();
         seedPhase3();
         seedPhase4();
+        seedPhase5();
     }
 
     // ---- Phase 1 v1.0.0 (kept published for replay of Phase 1 cases; Principle I) ------------------
@@ -614,6 +616,30 @@ public class CatalogSeedLoader implements ApplicationRunner {
                 {"name":"Assessment Findings","kind":"FINDINGS","producedBy":"assessment-findings"}""");
         seed("template", "assessment-recommendation", V4, """
                 {"name":"Assessment Recommendation","kind":"RECOMMENDATION","producedBy":"assessment-recommendation"}""");
+    }
+
+    // ---- Phase 5 v5.0.0 (governance gate SUBPROCESS defs + default ESCALATION_POLICY, T011) ------
+
+    /**
+     * Seeds the two gate {@code SUBPROCESS} DefinitionAssets and the default {@code
+     * ESCALATION_POLICY} DefinitionAsset (data-model.md "Modified Entities" — new {@code
+     * definition_asset.type} values, content-level, widened by catalog's V24 migration). Bodies are
+     * intentionally minimal placeholders here: the actual {@code review-gate.bpmn20.xml} / {@code
+     * approval-gate.bpmn20.xml} process definitions land in Phase 3 (T012/T013), and {@code
+     * GateService}/{@code EscalationPolicyResolver} (also later phases) are what actually reads these
+     * bodies at runtime. Seeded now so Phase 3+ can reference them by (type,key,version) immediately.
+     */
+    private void seedPhase5() {
+        seed("SUBPROCESS", "subprocess.review-gate", V5, """
+                {"processDefinitionKey":"review-gate","engine":"flowable"}""");
+        seed("SUBPROCESS", "subprocess.approval-gate", V5, """
+                {"processDefinitionKey":"approval-gate","engine":"flowable"}""");
+
+        // Default advisory-SLA role chain (research R4): mirrors d2os.governance.sla.default-durations
+        // (T003, application.yml) as the per-step fallback duration when a gate doesn't pin a longer
+        // chain of its own.
+        seed("ESCALATION_POLICY", "escalation-policy.default", V5, """
+                {"steps":[{"stepIndex":0,"role":"reviewer","durationIso8601":"P3D"}]}""");
     }
 
     private String escape(String s) {
