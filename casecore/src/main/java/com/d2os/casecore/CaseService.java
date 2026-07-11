@@ -65,8 +65,13 @@ public class CaseService {
 
     @Transactional
     public CaseInstance openCase(SubmissionLookup.SubmissionInfo submission, UUID featureId) {
+        // Phase 4 (T012, US1, contracts `/cases` 412): a submission's confirmed flag now reflects the
+        // case-type classification's classification_status = CONFIRMED (IntakeSubmissionLookup), which
+        // subsumes the Phase 1-3 confirm-classification flow (ProblemSubmission.confirm keeps both in
+        // sync). Case creation is blocked with 412, not the generic 422, until that gate is satisfied.
         if (!submission.confirmed()) {
-            throw new CaseCreationException("submission " + submission.id() + " is not confirmed");
+            throw new ClassificationNotConfirmedException(
+                    "submission " + submission.id() + " classification is not yet confirmed");
         }
 
         Feature feature = featureRepository.findById(featureId)

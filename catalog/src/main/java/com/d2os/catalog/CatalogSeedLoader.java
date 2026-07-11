@@ -255,7 +255,13 @@ public class CatalogSeedLoader implements ApplicationRunner {
      * are authored (T008/T014/T020/T030) — filled in by T009/T015/T016/T021/T022/T031.
      */
     private void seedPhase4() {
-        // Intentionally empty (T003 scaffold). Phase 3/4 user-story tasks add seed() calls here.
+        // US1 (T009, research R1/R5): bind the case-type-classification DMN (T008) as a published
+        // RuleDefinition, same shape as the Phase 1 `rule.submission-classification` seed above —
+        // {"decisionKey":..., "engine":"flowable-dmn"}. decisionKey matches the DMN's
+        // <decision id="caseTypeClassification"> in orchestration/src/main/resources/dmn/
+        // case-type-classification.dmn.
+        seed("rule", "case-type-classification", V4, """
+                {"decisionKey":"caseTypeClassification","engine":"flowable-dmn"}""");
     }
 
     private String escape(String s) {

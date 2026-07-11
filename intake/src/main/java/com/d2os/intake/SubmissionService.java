@@ -1,5 +1,9 @@
 package com.d2os.intake;
 
+import com.d2os.casecore.AuditWriter;
+import com.d2os.casecore.DecisionRecord;
+import com.d2os.casecore.DecisionRepository;
+import com.d2os.intake.dto.ConfirmCaseTypeRequest;
 import com.d2os.intake.dto.ConfirmClassificationRequest;
 import com.d2os.intake.dto.CreateSubmissionRequest;
 import com.d2os.tenancy.WorkspaceContext;
@@ -8,22 +12,36 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.UUID;
 
 /** Intake orchestration: create + classify (T023/T024), and human confirm (T025). */
 @Service
 public class SubmissionService {
 
+    /** contracts/api.yaml CaseTypeClassification#confirmedCaseType enum (UNDETERMINED excluded). */
+    private static final Set<String> CONFIRMABLE_CASE_TYPES = Set.of("INITIATION", "ASSESSMENT", "ENHANCEMENT");
+
     private final ProblemSubmissionRepository repository;
     private final ClassificationService classificationService;
+    private final CaseTypeClassificationService caseTypeClassificationService;
+    private final AuditWriter auditWriter;
+    private final DecisionRepository decisionRepository;
     private final ObjectMapper objectMapper;
 
     public SubmissionService(ProblemSubmissionRepository repository,
                              ClassificationService classificationService,
+                             CaseTypeClassificationService caseTypeClassificationService,
+                             AuditWriter auditWriter,
+                             DecisionRepository decisionRepository,
                              ObjectMapper objectMapper) {
         this.repository = repository;
         this.classificationService = classificationService;
+        this.caseTypeClassificationService = caseTypeClassificationService;
+        this.auditWriter = auditWriter;
+        this.decisionRepository = decisionRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -42,6 +60,12 @@ public class SubmissionService {
         ClassificationResult result = classificationService.classify(request.formData());
         submission.applyClassification(result);
 
+        // Phase 4 (T010, US1, research R5): run the case-type-classification DMN alongside the Phase
+        // 1-3 classify step (not a duplicate pipeline — same classify moment, second advisory output)
+        // and persist its proposal (INITIATION/ASSESSMENT/ENHANCEMENT/UNDETERMINED).
+        String proposedCaseType = caseTypeClassificationService.classify(request.formData());
+        submission.applyCaseTypeProposal(proposedCaseType);
+
         return repository.save(submission);
     }
 
@@ -50,9 +74,53 @@ public class SubmissionService {
     public ProblemSubmission confirmClassification(UUID submissionId, ConfirmClassificationRequest request) {
         ProblemSubmission submission = repository.findById(submissionId)
                 .orElseThrow(() -> new NoSuchElementException("submission " + submissionId));
-        // TODO(T017): also write a formal D1 Decision + AuditEntry via AuditWriter once available.
         submission.confirm("api", request.confirmedCaseType());
         return repository.save(submission);
+    }
+
+    /**
+     * Phase 4 (T011, US1): human confirm/override of the case-type-classification proposal — the
+     * authority of record on case type (research R5). Confirming with a type different from the
+     * proposal records an override; the original proposal is preserved unchanged. Writes a D4
+     * Decision + AuditEntry in the SAME transaction (data-model.md invariant). 409 (mapped by
+     * {@link SubmissionController}) if already CONFIRMED.
+     */
+    @Transactional
+    public ProblemSubmission confirmCaseType(UUID submissionId, ConfirmCaseTypeRequest request) {
+        if (!CONFIRMABLE_CASE_TYPES.contains(request.caseType())) {
+            throw new IllegalArgumentException(
+                    "caseType must be one of " + CONFIRMABLE_CASE_TYPES + ", got " + request.caseType());
+        }
+        ProblemSubmission submission = repository.findById(submissionId)
+                .orElseThrow(() -> new NoSuchElementException("submission " + submissionId));
+
+        if ("CONFIRMED".equals(submission.getClassificationStatus())) {
+            throw new AlreadyConfirmedException(
+                    "submission " + submissionId + " case type is already confirmed");
+        }
+
+        String proposedBefore = submission.getProposedCaseType();
+        submission.confirmCaseType(request.caseType());
+        submission = repository.save(submission);
+
+        boolean overridden = submission.isClassificationOverridden();
+
+        // D4 — human decision, the authority of record on case type (AD-5 §9). caseInstanceId is
+        // null: no Case exists yet at confirm time (Case creation is gated on this confirmation,
+        // T012) — see DecisionRecord's V19 note. inputsRef ties the decision back to the submission.
+        DecisionRecord decision = new DecisionRecord(
+                UUID.randomUUID(), submission.getWorkspaceId(), null, "D4", "api",
+                request.rationale(), submissionId.toString());
+        decision = decisionRepository.save(decision);
+
+        auditWriter.record(submission.getWorkspaceId(), "problem_submission", submissionId,
+                overridden ? "CASE_TYPE_OVERRIDDEN" : "CASE_TYPE_CONFIRMED", "api",
+                Map.of("proposedCaseType", String.valueOf(proposedBefore),
+                        "confirmedCaseType", submission.getConfirmedCaseType(),
+                        "overridden", overridden,
+                        "decisionId", decision.getId().toString()));
+
+        return submission;
     }
 
     private String toJson(Object value) {
