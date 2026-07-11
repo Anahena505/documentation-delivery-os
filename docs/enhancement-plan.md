@@ -272,3 +272,30 @@ continuously checked; DR is proven against the real schema.
   it.
 - Adding new product features (new case types, new personas) ahead of the deferred-wiring completion
   (E10) — finish the content path before widening it.
+
+---
+
+## 6. Delivery status (feature 008)
+
+This plan was turned into the spec-kit feature **`specs/008-production-readiness/`** (spec → plan →
+70 tasks) and is being implemented on branch `claude/close-repo-emniau`. Mapping of the E-items above
+to that feature's user stories and current state:
+
+| E-item | 008 story | Status |
+|---|---|---|
+| E1 CI/CD | US1 | **Delivered** — `.github/workflows/ci.yml` + `nightly.yml` |
+| E2 Testcontainers fix | US1 (T001) | **Delivered & proven** — Boot-managed `testcontainers.version`→1.20.3 moves docker-java to 3.4.0; API-negotiation error gone. ITs run in CI (sandbox lacks image-registry egress only) |
+| E3 unit layer | US1 | **Delivered** — 17 fast unit tests, no infra |
+| E4 coverage/static analysis | Setup | **Delivered** — JaCoCo + Spotless + SpotBugs (non-breaking) |
+| E5 auth + RBAC | US5 | In progress |
+| E6 observability | US2 | In progress |
+| E7 ShedLock | US3 | In progress |
+| E8 containerize/deploy | US4 | **Partly delivered** — Helm chart + probes; image/build config pending |
+| E9 secrets/keys | US4/US5 | Helm secret-refs delivered; asymmetric-key cutover with US5 |
+| E10 template→artifact | US6 | Pending |
+| E11 contract conformance | US7 | Pending |
+| E12 run benchmarks | US7 | `nightly.yml` wired; baselines pending a CI run |
+| E13 DR at scale | US7 | **Partly delivered** — `ops/dr-rehearsal.sh` + `ops/backup-verify.sh` |
+| E14 docs | Polish | **Delivered** — root `README.md` + `CLAUDE.md` |
+
+See `specs/008-production-readiness/tasks.md` for per-task `[X]` state.

@@ -414,7 +414,7 @@ results; DR rehearsal restores the real schema and passes integrity checks.
 - [X] T066 [P] Create `CLAUDE.md` at repo root capturing the conventions in this file's header (system
   Gradle path, global Flyway V-namespace, additive-within-module rule, SPI dependency-inversion
   pattern) so future contributors/agents inherit them. Acceptance: file present.
-- [ ] T067 [P] Update `docs/enhancement-plan.md` to mark the E1–E14 items now delivered by this
+- [X] T067 [P] Update `docs/enhancement-plan.md` to mark the E1–E14 items now delivered by this
   feature, cross-referencing spec 008. Acceptance: file updated.
 - [ ] T068 Run `/opt/gradle/bin/gradle spotlessApply` then `spotlessCheck` to normalize formatting
   across all new files. Acceptance: `spotlessCheck` passes.
