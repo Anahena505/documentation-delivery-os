@@ -34,6 +34,15 @@ public class ArtifactRevision {
     @Column(name = "produced_by_operation_execution_id")
     private UUID producedByOperationExecutionId;
 
+    // US6 (V32, FR-014): provenance to the immutable TemplateDefinition version this revision's
+    // content was deterministically rendered from. NULL for placeholder/legacy revisions and for any
+    // revision whose owning case pinned no renderable template (additive, behavior-preserving).
+    @Column(name = "source_template_id")
+    private UUID sourceTemplateId;
+
+    @Column(name = "template_version")
+    private String templateVersion;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
@@ -41,6 +50,15 @@ public class ArtifactRevision {
 
     public ArtifactRevision(UUID id, UUID workspaceId, UUID artifactId, int revisionNo,
                             String storageRef, String contentHash, UUID producedByOperationExecutionId) {
+        this(id, workspaceId, artifactId, revisionNo, storageRef, contentHash,
+                producedByOperationExecutionId, null, null);
+    }
+
+    /** US6 (T056): provenance-carrying constructor — {@code sourceTemplateId}/{@code templateVersion}
+     * are NULL when this revision was not rendered from a pinned TemplateDefinition. */
+    public ArtifactRevision(UUID id, UUID workspaceId, UUID artifactId, int revisionNo,
+                            String storageRef, String contentHash, UUID producedByOperationExecutionId,
+                            UUID sourceTemplateId, String templateVersion) {
         this.id = id;
         this.workspaceId = workspaceId;
         this.artifactId = artifactId;
@@ -48,6 +66,8 @@ public class ArtifactRevision {
         this.storageRef = storageRef;
         this.contentHash = contentHash;
         this.producedByOperationExecutionId = producedByOperationExecutionId;
+        this.sourceTemplateId = sourceTemplateId;
+        this.templateVersion = templateVersion;
     }
 
     public UUID getId() { return id; }
@@ -57,5 +77,7 @@ public class ArtifactRevision {
     public String getStorageRef() { return storageRef; }
     public String getContentHash() { return contentHash; }
     public UUID getProducedByOperationExecutionId() { return producedByOperationExecutionId; }
+    public UUID getSourceTemplateId() { return sourceTemplateId; }
+    public String getTemplateVersion() { return templateVersion; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
 }

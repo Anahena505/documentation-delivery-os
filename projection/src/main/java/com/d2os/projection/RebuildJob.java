@@ -292,7 +292,8 @@ public class RebuildJob {
     private void buildArtifactRevisionNodes(UUID workspaceId, int generation, List<GraphNode> nodes, List<GraphEdge> edges) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "SELECT ar.id AS revision_id, ar.artifact_id, ar.revision_no, a.artifact_type, "
-                        + "       ar.produced_by_operation_execution_id "
+                        + "       ar.produced_by_operation_execution_id, ar.source_template_id, "
+                        + "       ar.template_version "
                         + "FROM artifact_revision ar JOIN artifact a ON a.id = ar.artifact_id "
                         + "WHERE ar.workspace_id = ?",
                 workspaceId);
@@ -301,6 +302,7 @@ public class RebuildJob {
             NodeEdgeMapper.ArtifactRevisionFact fact = new NodeEdgeMapper.ArtifactRevisionFact(workspaceId,
                     (UUID) row.get("artifact_id"), revisionId, ((Number) row.get("revision_no")).intValue(),
                     (String) row.get("artifact_type"), (UUID) row.get("produced_by_operation_execution_id"),
+                    (UUID) row.get("source_template_id"), (String) row.get("template_version"),
                     revisionId, OffsetDateTime.now());
             NodeEdgeMapper.MappingResult result = mapper.mapArtifactRevision(fact, generation);
             nodes.addAll(result.nodes());

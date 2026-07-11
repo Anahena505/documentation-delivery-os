@@ -157,9 +157,12 @@ public class EquivalenceVerifier {
                     .add(row.get("feature_id").toString());
         }
 
-        // ARTIFACT_REVISION (+ REQUIREMENT subtype) + OPERATION_EXECUTION (from produced_by_...).
+        // ARTIFACT_REVISION (+ REQUIREMENT subtype) + OPERATION_EXECUTION (from produced_by_...) +,
+        // as of US6 (T058), TEMPLATE/DEFINITION_VERSION provenance nodes (from source_template_id +
+        // template_version) — independently mirroring NodeEdgeMapper#mapArtifactRevision.
         List<Map<String, Object>> revisions = jdbcTemplate.queryForList(
-                "SELECT ar.id, a.artifact_type, ar.produced_by_operation_execution_id "
+                "SELECT ar.id, a.artifact_type, ar.produced_by_operation_execution_id, "
+                        + "       ar.source_template_id, ar.template_version "
                         + "FROM artifact_revision ar JOIN artifact a ON a.id = ar.artifact_id "
                         + "WHERE ar.workspace_id = ?",
                 workspaceId);
@@ -173,6 +176,13 @@ public class EquivalenceVerifier {
             if (opExecId != null) {
                 byType.computeIfAbsent(NodeEdgeMapper.NODE_OPERATION_EXECUTION, t -> new TreeSet<>())
                         .add(opExecId.toString());
+            }
+            Object sourceTemplateId = row.get("source_template_id");
+            Object templateVersion = row.get("template_version");
+            if (sourceTemplateId != null && templateVersion != null) {
+                String templateKey = sourceTemplateId + ":" + templateVersion;
+                byType.computeIfAbsent(NodeEdgeMapper.NODE_TEMPLATE, t -> new TreeSet<>()).add(templateKey);
+                byType.computeIfAbsent(NodeEdgeMapper.NODE_DEFINITION_VERSION, t -> new TreeSet<>()).add(templateKey);
             }
         }
 
@@ -241,17 +251,29 @@ public class EquivalenceVerifier {
             byType.computeIfAbsent(NodeEdgeMapper.EDGE_BELONGS_TO, t -> new TreeSet<>()).add(key);
         }
 
-        // PRODUCED: OPERATION_EXECUTION -> ARTIFACT_REVISION, sourceRef = revision id (self-id).
+        // PRODUCED: OPERATION_EXECUTION -> ARTIFACT_REVISION, sourceRef = revision id (self-id). US6
+        // (T058) adds PRODUCED_FROM: ARTIFACT_REVISION -> TEMPLATE, sourceRef = revision id, whenever
+        // the revision carries provenance — mirroring NodeEdgeMapper#mapArtifactRevision.
         List<Map<String, Object>> revisions = jdbcTemplate.queryForList(
-                "SELECT id, produced_by_operation_execution_id FROM artifact_revision WHERE workspace_id = ?",
+                "SELECT id, produced_by_operation_execution_id, source_template_id, template_version "
+                        + "FROM artifact_revision WHERE workspace_id = ?",
                 workspaceId);
         for (Map<String, Object> row : revisions) {
-            Object opExecId = row.get("produced_by_operation_execution_id");
-            if (opExecId == null) continue;
             String revisionId = row.get("id").toString();
-            String key = edgeIdentity(NodeEdgeMapper.NODE_OPERATION_EXECUTION, opExecId.toString(),
-                    NodeEdgeMapper.NODE_ARTIFACT_REVISION, revisionId, revisionId);
-            byType.computeIfAbsent(NodeEdgeMapper.EDGE_PRODUCED, t -> new TreeSet<>()).add(key);
+            Object opExecId = row.get("produced_by_operation_execution_id");
+            if (opExecId != null) {
+                String key = edgeIdentity(NodeEdgeMapper.NODE_OPERATION_EXECUTION, opExecId.toString(),
+                        NodeEdgeMapper.NODE_ARTIFACT_REVISION, revisionId, revisionId);
+                byType.computeIfAbsent(NodeEdgeMapper.EDGE_PRODUCED, t -> new TreeSet<>()).add(key);
+            }
+            Object sourceTemplateId = row.get("source_template_id");
+            Object templateVersion = row.get("template_version");
+            if (sourceTemplateId != null && templateVersion != null) {
+                String templateKey = sourceTemplateId + ":" + templateVersion;
+                String key = edgeIdentity(NodeEdgeMapper.NODE_ARTIFACT_REVISION, revisionId,
+                        NodeEdgeMapper.NODE_TEMPLATE, templateKey, revisionId);
+                byType.computeIfAbsent(NodeEdgeMapper.EDGE_PRODUCED_FROM, t -> new TreeSet<>()).add(key);
+            }
         }
 
         // GATED_BY: subject -> GATE, sourceRef = gate id (self-id).

@@ -538,8 +538,18 @@ public class CatalogSeedLoader implements ApplicationRunner {
     private void seedConditionalArtifacts() {
         seed("rule", "conditional-artifacts", V4, """
                 {"decisionKey":"conditionalArtifacts","engine":"flowable-dmn"}""");
-        seed("template", "dpia", V4, """
-                {"name":"Data Protection Impact Assessment","kind":"DPIA","producedBy":null}""");
+        seed("template", "dpia", V4, templateBody(
+                "Data Protection Impact Assessment", "DPIA", null, """
+                # Data Protection Impact Assessment
+
+                _Rendered from the governed DPIA template (v{{templateVersion}}), kind {{artifactKind}}._
+
+                ## Assessment
+                {{body}}
+
+                ## Provenance
+                - Source persona output hash: `{{sourceContentHash}}`
+                - Template version: {{templateVersion}}"""));
     }
 
     // ---- US2 Assessment (T014-T016, research R2/R7): read-only case type, catalog content only -----
@@ -629,14 +639,37 @@ public class CatalogSeedLoader implements ApplicationRunner {
         }
 
         // The two package-facing templates (data-model.md): the delivered kinds this read-only case
-        // type is allowed to produce. "kind" here documents the allowlist value ArtifactService's
-        // deriveArtifactKind independently computes from the persona key (T017) — real
-        // TemplateDefinition->Artifact wiring is still deferred (see ArtifactService's note), so this
-        // body is provenance/documentation content for now, not yet consumed at materialization time.
-        seed("template", "assessment-findings", V4, """
-                {"name":"Assessment Findings","kind":"FINDINGS","producedBy":"assessment-findings"}""");
-        seed("template", "assessment-recommendation", V4, """
-                {"name":"Assessment Recommendation","kind":"RECOMMENDATION","producedBy":"assessment-recommendation"}""");
+        // type is allowed to produce. "kind" documents the allowlist value ArtifactService's
+        // deriveArtifactKind independently computes from the persona key (T017). As of US6 (T057) these
+        // carry a real {@code content} skeleton, so ArtifactService.renderFromPinnedTemplate renders
+        // the delivered Findings/Recommendation artifacts from THIS pinned template version (matched by
+        // producedBy == persona key) and stamps source_template_id + template_version onto the revision.
+        seed("template", "assessment-findings", V4, templateBody(
+                "Assessment Findings", "FINDINGS", "assessment-findings", """
+                # Assessment Findings
+
+                _Rendered from the governed Assessment Findings template (v{{templateVersion}}), \
+                kind {{artifactKind}}, authored by persona `{{personaKey}}`._
+
+                ## Consolidated Findings
+                {{body}}
+
+                ## Provenance
+                - Source persona output hash: `{{sourceContentHash}}`
+                - Template version: {{templateVersion}}"""));
+        seed("template", "assessment-recommendation", V4, templateBody(
+                "Assessment Recommendation", "RECOMMENDATION", "assessment-recommendation", """
+                # Assessment Recommendation
+
+                _Rendered from the governed Assessment Recommendation template (v{{templateVersion}}), \
+                kind {{artifactKind}}, authored by persona `{{personaKey}}`._
+
+                ## Recommendation
+                {{body}}
+
+                ## Provenance
+                - Source persona output hash: `{{sourceContentHash}}`
+                - Template version: {{templateVersion}}"""));
     }
 
     // ---- US3 Enhancement (T020-T022, research R4/R7): delta+impact case type anchored to a prior --
@@ -735,13 +768,35 @@ public class CatalogSeedLoader implements ApplicationRunner {
                     ]}""".formatted(p.key()));
         }
 
-        // The two package-facing templates (T022, data-model.md): documentation content only for now,
-        // same "not yet consumed at materialization time" status as Assessment's templates (see
-        // ArtifactService's note on TemplateDefinition wiring being deferred).
-        seed("template", "delta-doc", V4, """
-                {"name":"Enhancement Delta Document","kind":"DELTA_DOC","producedBy":"delta-doc"}""");
-        seed("template", "impact-analysis", V4, """
-                {"name":"Enhancement Impact Analysis","kind":"IMPACT_ANALYSIS","producedBy":"impact-analysis"}""");
+        // The two package-facing templates (T022, data-model.md). As of US6 (T057) these carry a real
+        // {@code content} skeleton, so ArtifactService renders the delivered Delta Document / Impact
+        // Analysis artifacts from THIS pinned template version and stamps provenance onto the revision.
+        seed("template", "delta-doc", V4, templateBody(
+                "Enhancement Delta Document", "DELTA_DOC", "delta-doc", """
+                # Enhancement Delta Document
+
+                _Rendered from the governed Enhancement Delta Document template (v{{templateVersion}}), \
+                kind {{artifactKind}}, authored by persona `{{personaKey}}`._
+
+                ## Consolidated Delta
+                {{body}}
+
+                ## Provenance
+                - Source persona output hash: `{{sourceContentHash}}`
+                - Template version: {{templateVersion}}"""));
+        seed("template", "impact-analysis", V4, templateBody(
+                "Enhancement Impact Analysis", "IMPACT_ANALYSIS", "impact-analysis", """
+                # Enhancement Impact Analysis
+
+                _Rendered from the governed Enhancement Impact Analysis template (v{{templateVersion}}), \
+                kind {{artifactKind}}, authored by persona `{{personaKey}}`._
+
+                ## Downstream Impact
+                {{body}}
+
+                ## Provenance
+                - Source persona output hash: `{{sourceContentHash}}`
+                - Template version: {{templateVersion}}"""));
     }
 
     // ---- Phase 5 v5.0.0 (governance gate SUBPROCESS defs + default ESCALATION_POLICY, T011) ------
@@ -843,6 +898,23 @@ public class CatalogSeedLoader implements ApplicationRunner {
 
         seed("workflow", "assessment-v2", V1, """
                 {"processDefinitionKey":"assessment-v2","engine":"flowable"}""");
+    }
+
+    /**
+     * T057 (US6, FR-014): build a TemplateDefinition body JSON carrying a real {@code content}
+     * skeleton alongside the existing {@code name}/{@code kind}/{@code producedBy} fields. The
+     * {@code content} uses the {@code {{slot}}} convention {@code ArtifactService.renderContent}
+     * substitutes deterministically at materialization time (studio {@code PromptEditorModel}'s slot
+     * model) — the persona output body binds to {@code {{body}}}, with provenance slots for kind,
+     * persona key, source hash, and template version. Additive: readers that only consume
+     * {@code kind}/{@code producedBy} (CaseService.extractKind, required_artifact pinning) are
+     * unaffected.
+     */
+    private String templateBody(String name, String kind, String producedBy, String content) {
+        String producedByJson = producedBy == null ? "null" : "\"" + escape(producedBy) + "\"";
+        return """
+                {"name":"%s","kind":"%s","producedBy":%s,"content":"%s"}"""
+                .formatted(escape(name), escape(kind), producedByJson, escape(content));
     }
 
     private String escape(String s) {

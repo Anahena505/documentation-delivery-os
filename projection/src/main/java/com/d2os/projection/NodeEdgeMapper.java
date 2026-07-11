@@ -68,8 +68,12 @@ public class NodeEdgeMapper {
     public static final String NODE_FEATURE = "FEATURE";
     public static final String NODE_PROJECT = "PROJECT";
     public static final String NODE_REQUIREMENT = "REQUIREMENT";
+    // US6 (spec 008, T058): the TemplateDefinition an artifact revision was rendered from, projected
+    // (like REQUIREMENT) as an ADDITIONAL node sharing the artifact-provenance natural key. Only
+    // emitted when an artifact_revision carries source_template_id + template_version.
+    public static final String NODE_TEMPLATE = "TEMPLATE";
 
-    // --- edge_type values (data-model.md's closed set) ---
+    // --- edge_type values (data-model.md's closed set; US6 adds PRODUCED_FROM for artifact provenance) ---
     public static final String EDGE_TRACES_TO = "TRACES_TO";
     public static final String EDGE_DEPENDS_ON = "DEPENDS_ON";
     public static final String EDGE_DERIVES_FROM = "DERIVES_FROM";
@@ -78,6 +82,9 @@ public class NodeEdgeMapper {
     public static final String EDGE_PRODUCED = "PRODUCED";
     public static final String EDGE_GATED_BY = "GATED_BY";
     public static final String EDGE_BELONGS_TO = "BELONGS_TO";
+    // US6 (spec 008, T058): ARTIFACT_REVISION -> TEMPLATE, "this revision's content was produced from
+    // that pinned template version" (data-model.md §3). Only emitted when provenance is present.
+    public static final String EDGE_PRODUCED_FROM = "PRODUCED_FROM";
 
     // --- source_kind values (data-model.md GraphNode.source_kind, research R2) ---
     public static final String SOURCE_OUTBOX_EVENT = "OUTBOX_EVENT";
@@ -126,6 +133,7 @@ public class NodeEdgeMapper {
 
     public record ArtifactRevisionFact(UUID workspaceId, UUID artifactId, UUID artifactRevisionId, int revisionNo,
                                         String artifactType, UUID producedByOperationExecutionId,
+                                        UUID sourceTemplateId, String templateVersion,
                                         UUID sourceEventId, OffsetDateTime createdAt) {}
 
     public MappingResult mapArtifactRevision(ArtifactRevisionFact fact, int generation) {
@@ -161,6 +169,29 @@ public class NodeEdgeMapper {
             nodes.add(operationNode);
             edges.add(edge(fact.workspaceId(), generation, EDGE_PRODUCED, operationNode.getId(),
                     revisionNode.getId(), Map.of(), SOURCE_OUTBOX_EVENT, sourceRef, fact.createdAt()));
+        }
+
+        // US6 (spec 008, T058, FR-014): a revision rendered from a pinned TemplateDefinition carries
+        // source_template_id + template_version. Project that provenance as a TEMPLATE node (plus a
+        // DEFINITION_VERSION node sharing its natural key — the same "one source fact, two node_type
+        // rows, same natural key" pattern as the REQUIREMENT subtype above) and a PRODUCED_FROM edge
+        // ARTIFACT_REVISION -> TEMPLATE. Natural key is {@code sourceTemplateId:templateVersion} —
+        // self-contained (no join), so the incremental Projector, RebuildJob, and EquivalenceVerifier
+        // compute an identical key. Absent for every pre-US6 (placeholder) revision, so this is purely
+        // additive to the existing graph.
+        if (fact.sourceTemplateId() != null && fact.templateVersion() != null) {
+            String templateKey = fact.sourceTemplateId() + ":" + fact.templateVersion();
+            Map<String, Object> templateAttrs = new LinkedHashMap<>();
+            templateAttrs.put("sourceTemplateId", fact.sourceTemplateId().toString());
+            templateAttrs.put("templateVersion", fact.templateVersion());
+            GraphNode templateNode = node(fact.workspaceId(), generation, NODE_TEMPLATE, templateKey,
+                    templateKey, templateAttrs, SOURCE_OUTBOX_EVENT, sourceRef, fact.createdAt());
+            nodes.add(templateNode);
+            GraphNode definitionNode = node(fact.workspaceId(), generation, NODE_DEFINITION_VERSION, templateKey,
+                    templateKey, templateAttrs, SOURCE_OUTBOX_EVENT, sourceRef, fact.createdAt());
+            nodes.add(definitionNode);
+            edges.add(edge(fact.workspaceId(), generation, EDGE_PRODUCED_FROM, revisionNode.getId(),
+                    templateNode.getId(), Map.of(), SOURCE_OUTBOX_EVENT, sourceRef, fact.createdAt()));
         }
         return new MappingResult(nodes, edges);
     }

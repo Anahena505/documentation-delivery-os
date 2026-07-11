@@ -346,11 +346,11 @@ projection/replay coverage.
 
 ### Implementation
 
-- [ ] T055 [US6] Create the provenance-columns migration as the next unused Flyway version (**V32**) at
+- [X] T055 [US6] Create the provenance-columns migration as the next unused Flyway version (**V32**) at
   `artifacts/src/main/resources/db/migration/V32__artifact_provenance.sql`: add nullable
   `source_template_id uuid` and `template_version text` to the artifact-revision table (per
   data-model.md §3). Acceptance: SQL valid.
-- [ ] T056 [US6] In `artifacts/src/main/java/com/d2os/artifacts/ArtifactService.java`, replace the
+- [X] T056 [US6] In `artifacts/src/main/java/com/d2os/artifacts/ArtifactService.java`, replace the
   deferred template association (the note near line 166 where the persona key "stands in") with real
   rendering: look up the pinned `TemplateDefinition` version from the case snapshot, render its body
   deterministically (reuse the studio slot convention `{{slot}}` from
@@ -358,15 +358,15 @@ projection/replay coverage.
   `source_template_id` + `template_version` on the produced revision. Do NOT introduce any AI call in
   the rendering path (must stay reproducible). Acceptance: compiles; a produced revision has non-null
   provenance.
-- [ ] T057 [US6] In `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java`, replace the
+- [X] T057 [US6] In `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java`, replace the
   placeholder operation/template content (notes near lines 147, 634, 700, 740) with real template
   bodies for the seeded operations so rendered artifacts are meaningful. Acceptance: compiles; seed
   loads.
-- [ ] T058 [US6] Extend `projection/src/main/java/com/d2os/projection/EquivalenceVerifier.java` (and the
+- [X] T058 [US6] Extend `projection/src/main/java/com/d2os/projection/EquivalenceVerifier.java` (and the
   `Projector`/`RebuildJob` scans it mirrors) to cover the `TEMPLATE`/`DEFINITION_VERSION` nodes and the
   `PRODUCED_FROM` edge now that provenance flows — following the same full-rescan wiring pattern the
   file already uses for `trace_link`/`dependency`. Acceptance: `:projection:compileJava` passes.
-- [ ] T059 [US6] Create `app/src/test/java/com/d2os/app/TemplateProvenanceIT.java`: run a case to
+- [X] T059 [US6] Create `app/src/test/java/com/d2os/app/TemplateProvenanceIT.java`: run a case to
   Delivered; assert each artifact's content derives from its template (not placeholder) and the
   revision carries provenance; assert replay is byte-identical. Acceptance: compiles; runs in CI.
 
