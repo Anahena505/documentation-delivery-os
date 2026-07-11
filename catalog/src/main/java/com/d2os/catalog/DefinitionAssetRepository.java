@@ -14,4 +14,7 @@ public interface DefinitionAssetRepository extends JpaRepository<DefinitionAsset
     List<DefinitionAsset> findByKeyAndStatus(String key, String status);
 
     Optional<DefinitionAsset> findByTypeAndKeyAndVersion(String type, String key, String version);
+
+    /** Phase 6 (T022, US3, research R5): every Published definition, for the compatibility-matrix scan. */
+    List<DefinitionAsset> findByStatus(String status);
 }

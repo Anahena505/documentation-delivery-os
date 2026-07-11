@@ -137,6 +137,26 @@ public final class ArchitectureRules {
                     + "rather than governance reaching into Flowable directly (plan.md Structure Decision)");
     }
 
+    /**
+     * {@code catalog} domain services stay UI-agnostic (Phase 6 US5, T031): no class in {@code
+     * com.d2os.catalog} may depend on {@code com.d2os.studio}. Structurally guaranteed already by
+     * {@code catalog/build.gradle} carrying no dependency on {@code studio} (the reverse direction —
+     * {@code studio} depends on {@code catalog} — is the only edge that exists), but pinned here as
+     * an explicit, always-checked invariant rather than an implicit consequence of the module graph
+     * (same value proposition as {@link #governanceHasNoFlowableDependency}): every catalog semantic
+     * (draft/publish/fork/deprecate/subscribe/compatibility) stays API-testable without a Thymeleaf
+     * context, and {@code studio} stays presentation-only.
+     */
+    public static ArchRule catalogDoesNotDependOnStudio() {
+        return noClasses()
+            .that().resideInAPackage("com.d2os.catalog..")
+            .should().dependOnClassesThat().resideInAPackage("com.d2os.studio..")
+            .because("catalog domain services (DraftService, ForkService, DeprecationImpactService, "
+                    + "CompatibilityMatrixService, SubscriptionService) are UI-agnostic — studio is "
+                    + "presentation-only, layered strictly on top of catalog (PublishService lives in "
+                    + "studio itself, not catalog, precisely because it also needs governance)");
+    }
+
     public static void checkAll(JavaClasses importedClasses) {
         personaNoPeerCalls().check(importedClasses);
         onlyGatewayCallsProviders().check(importedClasses);
@@ -145,5 +165,6 @@ public final class ArchitectureRules {
         personaExecutionBeansHoldNoMutableState().check(importedClasses);
         personaExecutionMachineryNeverRecursesIntoAnotherPersona().check(importedClasses);
         governanceHasNoFlowableDependency().check(importedClasses);
+        catalogDoesNotDependOnStudio().check(importedClasses);
     }
 }

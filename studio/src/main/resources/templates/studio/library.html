@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Catalog Studio &mdash; Global Library</title>
+    <script src="/studio/vendor/htmx/htmx.min.js" defer="defer"></script>
+</head>
+<body>
+<h1>Catalog Studio &mdash; Global Library</h1>
+<p>Published, system-seeded definitions (T027, US4). Read-only browse; subscribing copies the
+   version into this workspace, insulated from any later change to the Global source (FR-015).</p>
+
+<table border="1" cellpadding="4">
+    <thead>
+    <tr>
+        <th>Type</th>
+        <th>Key</th>
+        <th>Version</th>
+        <th>Subscription</th>
+        <th></th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="e : ${entries}">
+        <td th:text="${e.type}">type</td>
+        <td th:text="${e.key}">key</td>
+        <td th:text="${e.version}">version</td>
+        <td th:text="${e.copied_definition_id != null} ? 'subscribed' : 'not subscribed'">state</td>
+        <td>
+            <form th:if="${e.copied_definition_id == null}"
+                  th:action="@{'/api/v1/library/definitions/' + ${e.id} + '/subscribe'}" method="post">
+                <button type="submit">subscribe</button>
+            </form>
+            <span th:if="${e.copied_definition_id != null}">copied as <code th:text="${e.copied_definition_id}"></code></span>
+        </td>
+    </tr>
+    </tbody>
+</table>
+<p th:if="${#lists.isEmpty(entries)}">No Global-library content published yet.</p>
+</body>
+</html>

@@ -87,3 +87,17 @@ Re-run unchanged: all Phase 1–5 suites (gates, knowledge, routing, replay, lea
 | 4 | SC-006 | CopyOnSubscribeIT |
 | 5 | SC-007 | ResolutionBenchmarkIT |
 | 6 | regression | existing suites |
+
+## Execution status
+
+All five new suites (StudioAuthoringIT, PublishGovernanceIT, LifecycleToolingIT, CopyOnSubscribeIT,
+ResolutionBenchmarkIT) and the new `catalog`/`studio` production code are implemented and
+`gradle :app:compileJava :app:compileTestJava` clean; the new `catalogDoesNotDependOnStudio`
+ArchUnit rule (no Docker needed) passes together with every prior-phase rule. The Testcontainers-backed
+IT suites themselves — both the five new ones and the re-run Phase 1–5 regression suites — could not be
+executed in this sandbox (Testcontainers 1.19.8's pinned docker-java client negotiates Docker API 1.32
+against this environment's dockerd 29.3.1, minimum API 1.40 — a client/server version mismatch, not a
+missing-Docker problem). The Phase 1–5 regression claim (T032) is therefore an audit, not a live run:
+manual review of V21/V22 against every Phase 1–5 repository/query found no incompatible column usage.
+Recommend running the full suite (including `:app:slowTest` for `ResolutionBenchmarkIT`) in CI or a
+Testcontainers-compatible Docker environment before treating this phase as verified end to end.
