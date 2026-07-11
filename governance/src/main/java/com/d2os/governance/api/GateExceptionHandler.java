@@ -2,6 +2,7 @@ package com.d2os.governance.api;
 
 import com.d2os.governance.IllegalGateTransitionException;
 import com.d2os.governance.SelfReviewNotAllowedException;
+import com.d2os.governance.reopen.ReopenNotAllowedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -21,6 +22,11 @@ public class GateExceptionHandler {
     @ExceptionHandler(SelfReviewNotAllowedException.class)
     public ProblemDetail onSelfReview(SelfReviewNotAllowedException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
+    }
+
+    @ExceptionHandler(ReopenNotAllowedException.class)
+    public ProblemDetail onReopenNotAllowed(ReopenNotAllowedException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
     }
 
     @ExceptionHandler(NoSuchElementException.class)

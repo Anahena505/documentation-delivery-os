@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             id="d2os-reopen-direct-dependents"
+             name="D2OS Reopen Direct Dependents"
+             namespace="http://d2os.com/dmn">
+  <!--
+    Phase 5 reopen policy (T024, US3, research R3, FR-006, Q8/AD-5). DMN engines aren't graph
+    traversal engines — the actual dependent-discovery walk over trace_link is ReopenCandidateService's
+    job (T025). This decision's scope is narrower and deliberately authorable: given one edge's kind
+    (DERIVES_FROM/SATISFIES/CONFLICTS_WITH/...), does a revision on its "to" side (the upstream) mean
+    the "from" side (the dependent) needs its gate reopened? Keeping that policy in a decision table
+    rather than a hardcoded enum check means a future edge kind (or the decision to STOP treating one
+    of these two as reopen-triggering) is a catalog content change, never a code change.
+
+    Hit policy COLLECT: harmless with a single-input/single-output boolean decision (there's nothing to
+    collect across, since exactly one rule can ever match one edge_kind value) — chosen for consistency
+    with conditional-artifacts.dmn's "policy that may grow more rows later" style rather than UNIQUE's
+    implied single-answer guarantee, since a future edge kind could legitimately match zero rows
+    (default: does not trigger) OR this table could later gain per-kind nuance without hitting a
+    UNIQUE conflict.
+  -->
+  <decision id="reopenDirectDependents" name="Reopen Direct Dependents">
+    <decisionTable id="dt-reopen-direct-dependents" hitPolicy="COLLECT">
+      <input id="in-edgeKind" label="Edge Kind">
+        <inputExpression id="ie-edgeKind" typeRef="string">
+          <text>edge_kind</text>
+        </inputExpression>
+      </input>
+      <output id="out-triggersReopen" label="Triggers Reopen" name="triggersReopen" typeRef="boolean"/>
+
+      <!-- A dependent artifact whose content DERIVES_FROM the revised upstream must be re-reviewed. -->
+      <rule id="r-derives-from">
+        <inputEntry id="ie-r1-edgeKind"><text>"DERIVES_FROM"</text></inputEntry>
+        <outputEntry id="oe-r1-triggers"><text>true</text></outputEntry>
+      </rule>
+
+      <!-- A dependent artifact that SATISFIES a requirement carried by the revised upstream likewise. -->
+      <rule id="r-satisfies">
+        <inputEntry id="ie-r2-edgeKind"><text>"SATISFIES"</text></inputEntry>
+        <outputEntry id="oe-r2-triggers"><text>true</text></outputEntry>
+      </rule>
+
+      <!-- Every other edge kind (e.g. CONFLICTS_WITH) matches nothing here: does not trigger a reopen. -->
+    </decisionTable>
+  </decision>
+</definitions>

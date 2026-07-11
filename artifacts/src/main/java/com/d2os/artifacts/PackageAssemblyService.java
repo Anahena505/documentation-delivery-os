@@ -1,5 +1,6 @@
 package com.d2os.artifacts;
 
+import com.d2os.artifacts.access.PackageAccessService;
 import com.d2os.casecore.CaseDefinitionSnapshot;
 import com.d2os.casecore.CaseDefinitionSnapshotRepository;
 import com.d2os.casecore.CaseService;
@@ -29,6 +30,7 @@ public class PackageAssemblyService {
     private final ExecutionPackageRepository packageRepository;
     private final CaseDefinitionSnapshotRepository snapshotRepository;
     private final CaseService caseService;
+    private final PackageAccessService packageAccessService;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
 
@@ -37,6 +39,7 @@ public class PackageAssemblyService {
                                   ExecutionPackageRepository packageRepository,
                                   CaseDefinitionSnapshotRepository snapshotRepository,
                                   CaseService caseService,
+                                  PackageAccessService packageAccessService,
                                   ObjectMapper objectMapper,
                                   JdbcTemplate jdbcTemplate) {
         this.artifactRepository = artifactRepository;
@@ -44,6 +47,7 @@ public class PackageAssemblyService {
         this.packageRepository = packageRepository;
         this.snapshotRepository = snapshotRepository;
         this.caseService = caseService;
+        this.packageAccessService = packageAccessService;
         this.objectMapper = objectMapper;
         this.jdbcTemplate = jdbcTemplate;
     }
@@ -83,7 +87,11 @@ public class PackageAssemblyService {
         String manifestHash = HashUtil.sha256Hex(hashConcat.toString());
 
         ExecutionPackage pkg = new ExecutionPackage(UUID.randomUUID(), workspaceId, caseId, manifestJson, manifestHash);
-        return packageRepository.save(pkg);
+        packageRepository.save(pkg);
+        // Phase 7 US5 (T040, research R6, FR-015): reading a delivered package is default-deny; seed
+        // the one participant grant at delivery time rather than leaving it workspace-wide-open.
+        packageAccessService.seedParticipantGrant(workspaceId, pkg.getId());
+        return pkg;
     }
 
     /** SC-005: recompute the manifest hash from current member hashes and compare. */

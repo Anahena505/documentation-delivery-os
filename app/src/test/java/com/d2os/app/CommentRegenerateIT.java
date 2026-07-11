@@ -1,7 +1,10 @@
 package com.d2os.app;
 
 import com.d2os.app.support.StubAiGatewayClient;
+import com.d2os.replay.ReplayHarness;
+import com.d2os.replay.ReplayReport;
 import com.d2os.testsupport.ContainerFixtures;
+import com.d2os.tenancy.WorkspaceContext;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaMethod;
@@ -88,6 +91,9 @@ class CommentRegenerateIT {
 
     @Autowired
     StubAiGatewayClient.LatencyControllableGateway gateway;
+
+    @Autowired
+    ReplayHarness replayHarness;
 
     private static final UUID WORKSPACE_ID = UUID.randomUUID();
     private static UUID projectVersionId;
@@ -233,6 +239,42 @@ class CommentRegenerateIT {
         String payload = event.get("payload").toString();
         assertTrue(payload.contains("\"producedArtifactRevisionId\":\"" + newRevisionId + "\""),
                 "GATE_REGENERATION_TRIGGERED must carry the produced revision id");
+
+        // Phase 9 (T049, SC-008, FR-017): a regenerated completion replays byte-identically too — the
+        // same path materializing it (ArtifactService.createRevision) and recording it
+        // (OperationExecution) as any first-generation persona output, so ReplayHarness needs no
+        // special-casing for "this row came from a regeneration." Verified here rather than as a
+        // structural SnapshotCompletenessCheck change: RegenerationDelegate re-enters the STANDARD
+        // persona execution path (T019), so a regenerated OperationExecution is shape-identical to any
+        // other — SnapshotCompletenessCheck.isComplete/knowledgeContextReproduced already cover it with
+        // zero new fields required.
+        decide(headers, secondGateId, "reviewer-5", "APPROVE", null);
+        String finalStatus = pollForTerminalStatus(caseId, headers, Duration.ofSeconds(200));
+        assertEquals("Delivered", finalStatus, "the regenerated case must still reach Delivered");
+
+        WorkspaceContext.set(WORKSPACE_ID);
+        ReplayReport report;
+        try {
+            report = replayHarness.replay(UUID.fromString(caseId));
+        } finally {
+            WorkspaceContext.clear();
+        }
+        assertTrue(report.totalOperations() > 0, "expected recorded operations to replay");
+        assertEquals(0, report.mismatched(),
+                () -> "a case containing a regenerated completion must replay byte-identically; mismatched="
+                        + report.mismatched() + " of " + report.totalOperations());
+    }
+
+    private String pollForTerminalStatus(String caseId, HttpHeaders headers, Duration timeout) throws InterruptedException {
+        Instant deadline = Instant.now().plus(timeout);
+        String status = null;
+        while (Instant.now().isBefore(deadline)) {
+            ResponseEntity<Map> r = rest.exchange(url("/api/v1/cases/" + caseId), HttpMethod.GET, new HttpEntity<>(headers), Map.class);
+            status = (String) r.getBody().get("status");
+            if ("Delivered".equals(status) || "Escalated".equals(status) || "Suspended".equals(status)) return status;
+            Thread.sleep(500);
+        }
+        return status;
     }
 
     // ---- 2. GET /gates/{id}/delta-report -----------------------------------------------------------

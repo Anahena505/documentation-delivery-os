@@ -48,6 +48,7 @@ public class ExecutionPackage {
     }
 
     public UUID getId() { return id; }
+    public UUID getWorkspaceId() { return workspaceId; }
     public UUID getCaseInstanceId() { return caseInstanceId; }
     public String getManifest() { return manifest; }
     public String getManifestHash() { return manifestHash; }

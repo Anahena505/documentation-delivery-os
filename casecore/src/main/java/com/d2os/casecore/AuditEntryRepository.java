@@ -2,12 +2,19 @@ package com.d2os.casecore;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface AuditEntryRepository extends JpaRepository<AuditEntryRecord, UUID> {
     List<AuditEntryRecord> findBySubjectTypeAndSubjectIdOrderByTxTimeAsc(String subjectType, UUID subjectId);
+
+    /** Phase 7 (T038, US5, research R5): the whole unsealed tail, in deterministic chain order. */
+    List<AuditEntryRecord> findByWorkspaceIdOrderByTxTimeAscIdAsc(UUID workspaceId);
+
+    /** Phase 7 (T038): entries strictly after the prior segment's last-sealed entry. */
+    List<AuditEntryRecord> findByWorkspaceIdAndTxTimeAfterOrderByTxTimeAscIdAsc(UUID workspaceId, OffsetDateTime after);
 
     /**
      * Phase 5 (T023/T025, US3, research R4): the most recent audit entry of a given action for a

@@ -54,6 +54,7 @@ public class AuditEntryRecord {
     }
 
     public UUID getId() { return id; }
+    public UUID getWorkspaceId() { return workspaceId; }
     public String getSubjectType() { return subjectType; }
     public UUID getSubjectId() { return subjectId; }
     public String getAction() { return action; }
