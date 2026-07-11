@@ -1,0 +1,79 @@
+# Default values for the d2os chart.
+# Maps the .env.example surface: non-secret values go into `config` (rendered to a ConfigMap and
+# injected via envFrom), while credentials are declared as KEYS ONLY under `secrets` and populated
+# by the platform's external-secrets mechanism into the Secret named by `secretRefs`.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/d2os/d2os
+  # Defaults to .Chart.AppVersion when left blank; override per environment.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Non-secret application configuration. Every key here is rendered verbatim into the ConfigMap and
+# exposed to the container as an environment variable (see templates/configmap.yaml + deployment.yaml).
+# NEVER put credentials here — those belong under `secrets`.
+config:
+  # --- PostgreSQL (non-secret connection surface; passwords come from the Secret) ---
+  D2OS_DB_URL: "jdbc:postgresql://d2os-postgres:5432/d2os"
+  D2OS_DB_OWNER_USER: "d2os_owner"
+  D2OS_DB_APP_USER: "d2os_app"
+
+  # --- Object storage (MinIO / S3) ---
+  D2OS_STORAGE_ENDPOINT: "http://d2os-minio:9000"
+  D2OS_STORAGE_BUCKET: "d2os-artifacts"
+  D2OS_STORAGE_ACCESS_KEY: "d2os"
+
+  # --- AI gateway ---
+  D2OS_AI_PROVIDER: "anthropic"
+  D2OS_AI_MODEL: "claude-sonnet-5"
+
+  # --- Workspace-scoping / identity (OIDC RS256 upgrade — placeholders, set per environment) ---
+  D2OS_JWT_ISSUER: "https://issuer.example.com/d2os"
+  D2OS_OIDC_ISSUER_URI: "https://issuer.example.com/"
+  D2OS_OIDC_JWKS_URI: "https://issuer.example.com/.well-known/jwks.json"
+
+  # --- Spring / actuator ---
+  SPRING_PROFILES_ACTIVE: "prod"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,prometheus,info"
+
+# Credential wiring. `create: false` is the production default: the referenced Secret is expected to
+# be provisioned out-of-band by external-secrets (Vault / cloud secrets manager). The chart only
+# declares WHICH keys the app requires — no values are committed here.
+secretRefs:
+  # Name of the Kubernetes Secret the container reads via envFrom. When `secrets.create` is true the
+  # chart renders a Secret of this name (from `secrets.stringData`); otherwise it must pre-exist.
+  name: d2os-secrets
+
+secrets:
+  # Set true ONLY for throwaway/dev installs to let the chart render a Secret from `stringData`.
+  # In production leave false and let external-secrets populate `secretRefs.name`.
+  create: false
+  # Credential KEYS the application requires. In production these are the keys external-secrets must
+  # inject into the Secret. Values are intentionally empty — never commit real credentials.
+  keys:
+    - D2OS_DB_OWNER_PASSWORD
+    - D2OS_DB_APP_PASSWORD
+    - D2OS_STORAGE_SECRET_KEY
+    - D2OS_AI_API_KEY
+    - D2OS_JWT_SECRET
+  # Only consulted when `secrets.create: true` (dev). Map of key -> value; keep empty by default.
+  stringData: {}
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "2"
+    memory: "2Gi"
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

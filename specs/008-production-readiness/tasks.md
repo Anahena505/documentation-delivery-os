@@ -173,10 +173,10 @@ raises the lag gauge and fires the shipped alert.
   `projection/src/main/java/com/d2os/projection/ProjectionMetrics.java` reading the same values the
   existing lag/gap logic computes; the gate one in a governance metrics component. Acceptance:
   compiles; gauges visible at `/actuator/prometheus`.
-- [ ] T021 [P] [US2] Create `deploy/prometheus/alert-rules.yml` with Prometheus alerting rules firing
+- [X] T021 [P] [US2] Create `deploy/prometheus/alert-rules.yml` with Prometheus alerting rules firing
   on: projection lag > 30s sustained; `d2os.projection.gap.open` > 10; `d2os.gate.sla.breached` > 0;
   `d2os.rebuild.equivalence.divergent` > 0; any increase in `d2os.job.failures`. Acceptance: valid YAML.
-- [ ] T022 [P] [US2] Create `deploy/grafana/d2os-overview.json` — a starter dashboard with panels for
+- [X] T022 [P] [US2] Create `deploy/grafana/d2os-overview.json` — a starter dashboard with panels for
   HTTP RED (from `http.server.requests`) and the four domain gauges. Acceptance: valid JSON.
 
 **Checkpoint**: metrics, tracing, logs, and alerts exist. US2 shippable.
@@ -248,17 +248,17 @@ required secret fails startup.
 - [ ] T037 [P] [US4] In `app/src/main/resources/application.yml`, add graceful shutdown
   (`server.shutdown: graceful`, `spring.lifecycle.timeout-per-shutdown-phase: 30s`). Acceptance:
   compiles/boots.
-- [ ] T038 [P] [US4] Create `deploy/helm/Chart.yaml` (name `d2os`, version from project). Acceptance:
+- [X] T038 [P] [US4] Create `deploy/helm/Chart.yaml` (name `d2os`, version from project). Acceptance:
   valid YAML.
-- [ ] T039 [P] [US4] Create `deploy/helm/values.yaml` mapping the `.env.example` surface: image repo/tag,
+- [X] T039 [P] [US4] Create `deploy/helm/values.yaml` mapping the `.env.example` surface: image repo/tag,
   a `config:` map for non-secrets (DB URL/user, storage endpoint/bucket, AI provider/model, JWT
   issuer), and a `secretRefs:` list for credentials (DB passwords, storage secret key, OIDC/JWKS if
   any). Acceptance: valid YAML.
-- [ ] T040 [US4] Create `deploy/helm/templates/deployment.yaml` with a Deployment that: sets env from a
+- [X] T040 [US4] Create `deploy/helm/templates/deployment.yaml` with a Deployment that: sets env from a
   ConfigMap and a Secret; wires `livenessProbe` → `GET /actuator/health/liveness` and `readinessProbe`
   → `GET /actuator/health/readiness` on port 8080. Acceptance: `helm template deploy/helm` renders (or
   YAML is structurally valid if helm is unavailable).
-- [ ] T041 [P] [US4] Create `deploy/helm/templates/configmap.yaml` and `deploy/helm/templates/secret.yaml`
+- [X] T041 [P] [US4] Create `deploy/helm/templates/configmap.yaml` and `deploy/helm/templates/secret.yaml`
   from the values in T039 (Secret keyed for external-secrets injection; no literal secret values).
   Acceptance: valid YAML; no plaintext credentials committed.
 - [ ] T042 [US4] Confirm fail-loud on a missing required secret: verify (and add a short comment in
