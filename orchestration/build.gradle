@@ -1,5 +1,6 @@
 dependencies {
     implementation project(':tenancy')
+    implementation project(':catalog')
     implementation project(':casecore')
     implementation project(':persona')
     implementation project(':artifacts')

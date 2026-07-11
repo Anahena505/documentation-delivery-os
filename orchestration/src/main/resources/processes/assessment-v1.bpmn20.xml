@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://d2os.com/bpmn"
+             id="d2os-assessment-v1-definitions">
+
+  <!--
+    Assessment workflow v1 (T014, US2, research R7). Read-only by construction: no step in this shape
+    ever authors a mutating artifact kind — enforcement of that fact lives in ArtifactService.createRevision
+    (T017), not here; this BPMN just never asks for anything but FINDINGS/RECOMMENDATION content.
+
+    Shape (R7): intake context (assessment-intake, sequential) -> subject-analysis personas
+    (capability-analyst / gap-analyst / risk-analyst, parallel — reusing the Phase 2 fan-out pattern via
+    AssessmentSubjectAnalysisDelegate, see its javadoc) -> findings consolidation (assessment-findings,
+    sequential) -> recommendation persona (assessment-recommendation, sequential) -> rubric gates (the
+    existing per-persona validation pipeline inside PersonaExecutionService — no separate BPMN step,
+    same as initiation-v2) -> package assembly (findings + recommendation kinds only, enforced by
+    ArtifactService) -> deliver.
+
+    Activity ids ARE persona keys for every sequential/branch step (T008 convention, matches
+    initiation-v2.bpmn20.xml), so PersonaStepDelegate resolves each by id, and these exact keys are what
+    CatalogSeedLoader.seedPhase4() (T016) publishes personas/prompts/rubrics under. The parallel block's
+    wait state keeps the SAME activity id ("specialists-wait") as initiation-v2 so EscalationBridge —
+    which resolves it by processInstanceBusinessKey + that hardcoded activity id — needs no changes to
+    handle an Assessment case's branch escalations.
+  -->
+  <process id="assessment-v1" name="Assessment Case (read-only)" isExecutable="true">
+
+    <startEvent id="start"/>
+    <sequenceFlow id="s0" sourceRef="start" targetRef="assessment-intake"/>
+
+    <serviceTask id="assessment-intake" name="Assessment Intake"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s1" sourceRef="assessment-intake" targetRef="subject-analysis-specialists"/>
+
+    <!-- ===== Parallel subject-analysis block (R7): three independent analysis personas ===== -->
+    <serviceTask id="subject-analysis-specialists" name="Subject Analysis Specialists (Capability ∥ Gap ∥ Risk)"
+                 flowable:async="true" flowable:delegateExpression="${assessmentSubjectAnalysisDelegate}"/>
+    <sequenceFlow id="s2" sourceRef="subject-analysis-specialists" targetRef="gw-specialists"/>
+
+    <exclusiveGateway id="gw-specialists" default="w-spec-in"/>
+    <sequenceFlow id="v-spec" sourceRef="gw-specialists" targetRef="assessment-findings">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${validated}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="w-spec-in" sourceRef="gw-specialists" targetRef="specialists-wait"/>
+    <receiveTask id="specialists-wait" name="Await specialist escalation resolution"/>
+    <sequenceFlow id="w-spec-out" sourceRef="specialists-wait" targetRef="assessment-findings"/>
+    <!-- ===== end parallel block ===== -->
+
+    <serviceTask id="assessment-findings" name="Findings Consolidation"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s3" sourceRef="assessment-findings" targetRef="assessment-recommendation"/>
+
+    <serviceTask id="assessment-recommendation" name="Recommendation"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s4" sourceRef="assessment-recommendation" targetRef="assemble-package"/>
+
+    <serviceTask id="assemble-package" name="Assemble Package"
+                 flowable:async="true" flowable:delegateExpression="${assemblePackageDelegate}"/>
+    <sequenceFlow id="s5" sourceRef="assemble-package" targetRef="end"/>
+
+    <endEvent id="end"/>
+  </process>
+</definitions>

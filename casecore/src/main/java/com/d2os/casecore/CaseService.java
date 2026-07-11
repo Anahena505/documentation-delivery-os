@@ -256,6 +256,23 @@ public class CaseService {
         }
     }
 
+    /**
+     * Phase 4 (T018, research R2/R3): true if a Case pinned to {@code snapshot} must hold the Q2
+     * single-active-mutating-case guard slot on its Feature — i.e. the pinned case-type entry's
+     * {@code mutating} flag. Assessment ({@code mutating=false}) is exempt and this returns
+     * {@code false} for it.
+     *
+     * <p><b>Not yet called anywhere.</b> {@link MutatingCaseGuard#acquire}/{@link
+     * MutatingCaseGuard#release} are not wired into {@link #openCase} or {@link #transition} yet —
+     * that wiring is T027 (Phase 6/US4), out of scope for this delivery. This helper exists now so
+     * T027's wiring is a one-line gate: {@code if (requiresMutatingSlot(snapshot)) { guard.acquire(...); }}
+     * — the exemption logic lands with the Assessment case type (this phase) rather than being
+     * invented later, even though the guard call site itself doesn't exist until T027.
+     */
+    public boolean requiresMutatingSlot(CaseDefinitionSnapshot snapshot) {
+        return CaseTypeCapability.from(objectMapper, snapshot).mutating();
+    }
+
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
