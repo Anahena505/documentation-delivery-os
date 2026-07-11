@@ -73,20 +73,28 @@ Run against the restored instance before considering the drill (or a real incide
 
 ## Results
 
-**No drill has been executed against this runbook yet.** This delivery pass authored the WAL-archiving
-config (T044) and this procedure (T045) but could not execute T046's actual timed drill: this sandbox
-has no live, persistent Docker Compose stack (Testcontainers ephemeral containers only, torn down
-per test run — see every IT's own disclosed Docker/Testcontainers limitation in this delivery chain),
-so there is no real base backup, no real WAL archive with meaningful depth, and no realistic way to
-measure genuine RPO/RTO numbers without fabricating them.
+**A drill has been executed** — see `specs/005-governance-review-gates/quickstart-results.md` for the
+full write-up. Summary: this sandbox has no live, persistent Docker Compose stack (Testcontainers
+ephemeral containers only), but PostgreSQL 16 is installed locally outside Docker, which was enough to
+run the actual archive → base backup → point-in-time restore mechanism end to end against a standalone
+cluster — real `pg_basebackup`, real archived WAL segments, real `recovery.signal`/`restore_command`/
+`recovery_target_time`, real measured wall-clock RTO (81.5 s at drill scale), and an exact point-in-time
+boundary (0 rows leaked past the recovery target). What this run did NOT cover: the full application
+stack (Spring Boot, Flyway, the real D2OS schema, `AuditChainVerifier`/`ReplayHarness` post-restore
+validation) booting against a restored instance, since that requires the Docker Compose stack this
+sandbox cannot run.
 
-**Do not treat the RPO ≤ 15 min / RTO ≤ 1 h targets as verified** until a real drill is run against a
-persistent environment and this section is filled in with the operator, date, and actually-measured
-numbers. Recommended before production trust: run this procedure once in a staging environment,
-including deliberately stopping WAL archiving for a few minutes and inducing "unexpected" data loss, to
-confirm the whole chain (archive → base backup → restore → replay validation) actually works end to
-end, not just that each piece compiles/starts.
+**Treat the core restore mechanism as verified; treat the RPO ≤ 15 min / RTO ≤ 1 h targets as verified
+in mechanism but not yet at production scale/schema.** Recommended before full production trust: re-run
+this drill once in a persistent, Docker-capable environment against the real D2OS schema and a
+realistic data volume, including the full Post-Restore Validation suites (§ above) and a deliberate
+idle-period archive_timeout probe (this run's idle-timeout sub-check was inconclusive, not failed — see
+quickstart-results.md's Findings).
 
 ## Sign-off
 
-_Pending a real drill execution — see **Results** above._
+Drill executed 2026-07-11 by Claude (autonomous session) against a standalone local PostgreSQL 16
+cluster (not the Docker Compose stack — see **Results** above for scope). Restore mechanism confirmed
+working with real measured RTO = 81.5 s and an exact point-in-time recovery boundary. Full-stack
+post-restore validation remains outstanding pending a Docker-capable persistent environment — see
+`specs/005-governance-review-gates/quickstart-results.md` for the complete results and findings.
