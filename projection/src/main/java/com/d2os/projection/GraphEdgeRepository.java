@@ -19,4 +19,10 @@ public interface GraphEdgeRepository extends JpaRepository<GraphEdge, UUID> {
             UUID workspaceId, int generation, UUID toNode, String edgeType);
 
     List<GraphEdge> findByWorkspaceIdAndGeneration(UUID workspaceId, int generation);
+
+    /** T017 &mdash; all outgoing edges of a node regardless of type, for the node-detail adjacency list. */
+    List<GraphEdge> findByWorkspaceIdAndGenerationAndFromNode(UUID workspaceId, int generation, UUID fromNode);
+
+    /** T017 &mdash; all incoming edges of a node regardless of type, for the node-detail adjacency list. */
+    List<GraphEdge> findByWorkspaceIdAndGenerationAndToNode(UUID workspaceId, int generation, UUID toNode);
 }
