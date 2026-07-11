@@ -416,7 +416,7 @@ results; DR rehearsal restores the real schema and passes integrity checks.
   pattern) so future contributors/agents inherit them. Acceptance: file present.
 - [X] T067 [P] Update `docs/enhancement-plan.md` to mark the E1–E14 items now delivered by this
   feature, cross-referencing spec 008. Acceptance: file updated.
-- [ ] T068 Run `/opt/gradle/bin/gradle spotlessApply` then `spotlessCheck` to normalize formatting
+- [X] T068 Run `/opt/gradle/bin/gradle spotlessApply` then `spotlessCheck` to normalize formatting
   across all new files. Acceptance: `spotlessCheck` passes.
 - [X] T069 Run the full local verification: `/opt/gradle/bin/gradle compileJava compileTestJava -q --rerun`
   and `/opt/gradle/bin/gradle :test-support:test --tests ArchitectureRulesTest`. Acceptance: both green.

@@ -6,7 +6,7 @@ package com.d2os.studio;
  * InReview/Published/Deprecated) — HTTP 409 either way (tasks.md T008, contracts/api.yaml).
  */
 public class DraftConflictException extends RuntimeException {
-    public DraftConflictException(String message, Throwable cause) {
-        super(message, cause);
-    }
+  public DraftConflictException(String message, Throwable cause) {
+    super(message, cause);
+  }
 }

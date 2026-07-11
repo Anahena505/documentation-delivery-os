@@ -14,9 +14,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * 008 US5 (T046): maps an OIDC access token's {@code roles} (or {@code groups}) claim to Spring
- * Security {@code ROLE_*} authorities, and pins the token's {@code sub} as the principal name so the
- * authenticated user's identity is available to {@link AuthenticatedPrincipal} and to audit-actor
- * stamping.
+ * Security {@code ROLE_*} authorities, and pins the token's {@code sub} as the principal name so
+ * the authenticated user's identity is available to {@link AuthenticatedPrincipal} and to
+ * audit-actor stamping.
  *
  * <p>Active only when OIDC is enabled ({@code d2os.security.oidc.enabled=true}); in the default
  * posture no OIDC chain exists and this converter is never instantiated.

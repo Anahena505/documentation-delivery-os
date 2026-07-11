@@ -19,19 +19,22 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 
 /**
- * 008 US5 (T053): reusable test support for the OIDC resource-server path. Mints RS256 access tokens
- * signed by an in-test RSA keypair, and exposes a matching {@link JwtDecoder} (built from that
- * keypair's public key) so a {@code @SpringBootTest} booted in OIDC mode
- * ({@code d2os.security.oidc.enabled=true}) verifies those tokens without a live IdP or any network.
+ * 008 US5 (T053): reusable test support for the OIDC resource-server path. Mints RS256 access
+ * tokens signed by an in-test RSA keypair, and exposes a matching {@link JwtDecoder} (built from
+ * that keypair's public key) so a {@code @SpringBootTest} booted in OIDC mode ({@code
+ * d2os.security.oidc.enabled=true}) verifies those tokens without a live IdP or any network.
  *
  * <p>Import {@link OidcTestConfig} into an OIDC-mode IT to supply the test {@link JwtDecoder} bean;
  * because {@code spring.security.oauth2.resourceserver.jwt.issuer-uri}/{@code jwk-set-uri} default
- * empty, this bean is the only decoder on the context (an alternative to pointing {@code jwk-set-uri}
- * at a served JWKS). Existing default-mode ITs never touch this class, so they are unaffected.
+ * empty, this bean is the only decoder on the context (an alternative to pointing {@code
+ * jwk-set-uri} at a served JWKS). Existing default-mode ITs never touch this class, so they are
+ * unaffected.
  */
 public final class OidcTestSupport {
 
-  /** One RSA keypair per test JVM — deterministic within a run, never persisted, not a real secret. */
+  /**
+   * One RSA keypair per test JVM — deterministic within a run, never persisted, not a real secret.
+   */
   private static final RSAKey RSA_KEY = generate();
 
   private OidcTestSupport() {}
@@ -53,19 +56,24 @@ public final class OidcTestSupport {
     }
   }
 
-  /** Mint a signed OIDC access token with the required {@code sub}, {@code workspace_id}, {@code roles} claims. */
+  /**
+   * Mint a signed OIDC access token with the required {@code sub}, {@code workspace_id}, {@code
+   * roles} claims.
+   */
   public static String mintToken(String subject, UUID workspaceId, List<String> roles) {
     try {
-      JWTClaimsSet claims = new JWTClaimsSet.Builder()
-          .subject(subject)
-          .issuer("https://test-idp.d2os.local")
-          .claim("workspace_id", workspaceId.toString())
-          .claim("roles", roles)
-          .issueTime(Date.from(Instant.now()))
-          .expirationTime(Date.from(Instant.now().plus(Duration.ofHours(1))))
-          .build();
-      SignedJWT jwt = new SignedJWT(
-          new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(RSA_KEY.getKeyID()).build(), claims);
+      JWTClaimsSet claims =
+          new JWTClaimsSet.Builder()
+              .subject(subject)
+              .issuer("https://test-idp.d2os.local")
+              .claim("workspace_id", workspaceId.toString())
+              .claim("roles", roles)
+              .issueTime(Date.from(Instant.now()))
+              .expirationTime(Date.from(Instant.now().plus(Duration.ofHours(1))))
+              .build();
+      SignedJWT jwt =
+          new SignedJWT(
+              new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(RSA_KEY.getKeyID()).build(), claims);
       jwt.sign(new RSASSASigner(RSA_KEY));
       return jwt.serialize();
     } catch (JOSEException e) {
@@ -73,7 +81,10 @@ public final class OidcTestSupport {
     }
   }
 
-  /** Import into an OIDC-mode IT to supply the test {@link JwtDecoder} bean the resource server uses. */
+  /**
+   * Import into an OIDC-mode IT to supply the test {@link JwtDecoder} bean the resource server
+   * uses.
+   */
   @TestConfiguration
   public static class OidcTestConfig {
     @Bean

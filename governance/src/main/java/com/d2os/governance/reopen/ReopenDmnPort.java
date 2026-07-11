@@ -9,6 +9,8 @@ package com.d2os.governance.reopen;
  */
 public interface ReopenDmnPort {
 
-    /** True if a trace_link edge of {@code edgeKind} (e.g. {@code DERIVES_FROM}) triggers a reopen. */
-    boolean triggersReopen(String edgeKind);
+  /**
+   * True if a trace_link edge of {@code edgeKind} (e.g. {@code DERIVES_FROM}) triggers a reopen.
+   */
+  boolean triggersReopen(String edgeKind);
 }

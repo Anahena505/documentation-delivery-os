@@ -8,8 +8,8 @@ import org.springframework.stereotype.Component;
 /**
  * Governance domain-threshold gauge (feature 008 US2, T020, research R4, data-model.md §Operational
  * Signal). Registers {@code d2os.gate.sla.breached} — the count of advisory gate-SLA escalation
- * firings observed since process start — scraped at {@code /actuator/prometheus} and alerted on when
- * {@code > 0} (deploy/prometheus/alert-rules.yml).
+ * firings observed since process start — scraped at {@code /actuator/prometheus} and alerted on
+ * when {@code > 0} (deploy/prometheus/alert-rules.yml).
  *
  * <p>A gate breaches its advisory SLA when its non-interrupting boundary timer elapses and {@link
  * com.d2os.governance.escalation.TimerFiredHandler} records an {@code EscalationActivation}; that
@@ -21,16 +21,16 @@ import org.springframework.stereotype.Component;
 @Component
 public class GovernanceMetrics {
 
-    private final AtomicLong slaBreaches = new AtomicLong(0);
+  private final AtomicLong slaBreaches = new AtomicLong(0);
 
-    public GovernanceMetrics(MeterRegistry registry) {
-        Gauge.builder("d2os.gate.sla.breached", slaBreaches, AtomicLong::doubleValue)
-                .description("Cumulative count of advisory gate-SLA escalation firings observed")
-                .register(registry);
-    }
+  public GovernanceMetrics(MeterRegistry registry) {
+    Gauge.builder("d2os.gate.sla.breached", slaBreaches, AtomicLong::doubleValue)
+        .description("Cumulative count of advisory gate-SLA escalation firings observed")
+        .register(registry);
+  }
 
-    /** Record one advisory SLA breach (an escalation firing on an OPEN gate). */
-    public void recordSlaBreach() {
-        slaBreaches.incrementAndGet();
-    }
+  /** Record one advisory SLA breach (an escalation firing on an OPEN gate). */
+  public void recordSlaBreach() {
+    slaBreaches.incrementAndGet();
+  }
 }

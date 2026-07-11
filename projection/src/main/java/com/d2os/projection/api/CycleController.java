@@ -7,17 +7,16 @@ import com.d2os.projection.query.TraceabilityQueryService.GraphNodeView;
 import com.d2os.tenancy.WorkspaceContext;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 /**
  * T023 &mdash; {@code GET /graph/cycles} (contracts/api.yaml, FR-008/009, US3). {@link
@@ -38,70 +37,77 @@ import java.util.UUID;
 @RequestMapping("/api/v1/graph")
 public class CycleController {
 
-    private final JdbcTemplate jdbcTemplate;
-    private final GraphNodeRepository graphNodeRepository;
-    private final TraceabilityQueryService traceabilityQueryService;
-    private final ObjectMapper objectMapper;
+  private final JdbcTemplate jdbcTemplate;
+  private final GraphNodeRepository graphNodeRepository;
+  private final TraceabilityQueryService traceabilityQueryService;
+  private final ObjectMapper objectMapper;
 
-    public CycleController(JdbcTemplate jdbcTemplate, GraphNodeRepository graphNodeRepository,
-                           TraceabilityQueryService traceabilityQueryService, ObjectMapper objectMapper) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.graphNodeRepository = graphNodeRepository;
-        this.traceabilityQueryService = traceabilityQueryService;
-        this.objectMapper = objectMapper;
+  public CycleController(
+      JdbcTemplate jdbcTemplate,
+      GraphNodeRepository graphNodeRepository,
+      TraceabilityQueryService traceabilityQueryService,
+      ObjectMapper objectMapper) {
+    this.jdbcTemplate = jdbcTemplate;
+    this.graphNodeRepository = graphNodeRepository;
+    this.traceabilityQueryService = traceabilityQueryService;
+    this.objectMapper = objectMapper;
+  }
+
+  public record CycleFinding(UUID id, OffsetDateTime detectedAt, List<GraphNodeView> memberNodes) {}
+
+  @GetMapping("/cycles")
+  public ResponseEntity<List<CycleFinding>> cycles() {
+    UUID workspaceId = WorkspaceContext.require();
+    List<Map<String, Object>> rows =
+        jdbcTemplate.queryForList(
+            "SELECT id, subject_ref::text AS subject_ref_text, created_at FROM in_app_notification "
+                + "WHERE workspace_id = ? AND source_module = 'projection' AND type = 'CYCLE_DETECTED' "
+                + "ORDER BY created_at DESC",
+            workspaceId);
+
+    List<CycleFinding> findings = new ArrayList<>();
+    for (Map<String, Object> row : rows) {
+      CycleFinding finding = toCycleFinding(workspaceId, row);
+      if (finding != null) {
+        findings.add(finding);
+      }
+    }
+    return ResponseEntity.ok(findings);
+  }
+
+  private CycleFinding toCycleFinding(UUID workspaceId, Map<String, Object> row) {
+    Map<String, Object> subjectRef;
+    try {
+      subjectRef =
+          objectMapper.readValue(
+              (String) row.get("subject_ref_text"), new TypeReference<Map<String, Object>>() {});
+    } catch (Exception e) {
+      return null; // malformed subject_ref — defensive only, every write path here is our own
+    }
+    @SuppressWarnings("unchecked")
+    List<String> memberNodeIds = (List<String>) subjectRef.get("memberNodeIds");
+    if (memberNodeIds == null) {
+      return null;
     }
 
-    public record CycleFinding(UUID id, OffsetDateTime detectedAt, List<GraphNodeView> memberNodes) {}
-
-    @GetMapping("/cycles")
-    public ResponseEntity<List<CycleFinding>> cycles() {
-        UUID workspaceId = WorkspaceContext.require();
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT id, subject_ref::text AS subject_ref_text, created_at FROM in_app_notification "
-                        + "WHERE workspace_id = ? AND source_module = 'projection' AND type = 'CYCLE_DETECTED' "
-                        + "ORDER BY created_at DESC",
-                workspaceId);
-
-        List<CycleFinding> findings = new ArrayList<>();
-        for (Map<String, Object> row : rows) {
-            CycleFinding finding = toCycleFinding(workspaceId, row);
-            if (finding != null) {
-                findings.add(finding);
-            }
-        }
-        return ResponseEntity.ok(findings);
+    List<GraphNodeView> memberNodes = new ArrayList<>();
+    for (String idString : memberNodeIds) {
+      UUID nodeId = UUID.fromString(idString);
+      GraphNode node = graphNodeRepository.findByIdAndWorkspaceId(nodeId, workspaceId).orElse(null);
+      if (node == null) {
+        return null; // stale finding — see class javadoc
+      }
+      memberNodes.add(traceabilityQueryService.toView(node));
     }
 
-    private CycleFinding toCycleFinding(UUID workspaceId, Map<String, Object> row) {
-        Map<String, Object> subjectRef;
-        try {
-            subjectRef = objectMapper.readValue((String) row.get("subject_ref_text"),
-                    new TypeReference<Map<String, Object>>() {});
-        } catch (Exception e) {
-            return null; // malformed subject_ref — defensive only, every write path here is our own
-        }
-        @SuppressWarnings("unchecked")
-        List<String> memberNodeIds = (List<String>) subjectRef.get("memberNodeIds");
-        if (memberNodeIds == null) {
-            return null;
-        }
+    return new CycleFinding(
+        (UUID) row.get("id"), toOffsetDateTime(row.get("created_at")), memberNodes);
+  }
 
-        List<GraphNodeView> memberNodes = new ArrayList<>();
-        for (String idString : memberNodeIds) {
-            UUID nodeId = UUID.fromString(idString);
-            GraphNode node = graphNodeRepository.findByIdAndWorkspaceId(nodeId, workspaceId).orElse(null);
-            if (node == null) {
-                return null; // stale finding — see class javadoc
-            }
-            memberNodes.add(traceabilityQueryService.toView(node));
-        }
-
-        return new CycleFinding((UUID) row.get("id"), toOffsetDateTime(row.get("created_at")), memberNodes);
-    }
-
-    private static OffsetDateTime toOffsetDateTime(Object value) {
-        if (value instanceof OffsetDateTime odt) return odt;
-        if (value instanceof java.sql.Timestamp ts) return ts.toInstant().atOffset(java.time.ZoneOffset.UTC);
-        return null;
-    }
+  private static OffsetDateTime toOffsetDateTime(Object value) {
+    if (value instanceof OffsetDateTime odt) return odt;
+    if (value instanceof java.sql.Timestamp ts)
+      return ts.toInstant().atOffset(java.time.ZoneOffset.UTC);
+    return null;
+  }
 }

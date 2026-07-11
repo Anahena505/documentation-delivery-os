@@ -6,7 +6,7 @@ package com.d2os.governance;
  * GateExceptionHandler} (T017).
  */
 public class SelfReviewNotAllowedException extends RuntimeException {
-    public SelfReviewNotAllowedException(String message) {
-        super(message);
-    }
+  public SelfReviewNotAllowedException(String message) {
+    super(message);
+  }
 }

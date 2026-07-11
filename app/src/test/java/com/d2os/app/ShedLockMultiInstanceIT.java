@@ -17,8 +17,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * 008 US3 (T035, SC-006): proves the once-per-cycle guarantee at the lock level. Two acquisitions of
- * the SAME lock name against the SAME database (standing in for two app instances sharing one
+ * 008 US3 (T035, SC-006): proves the once-per-cycle guarantee at the lock level. Two acquisitions
+ * of the SAME lock name against the SAME database (standing in for two app instances sharing one
  * Postgres) must not both succeed within the lock window — exactly one holder per cycle, so a
  * scheduled job body runs once across the deployment, never once per node.
  *
@@ -48,7 +48,8 @@ class ShedLockMultiInstanceIT {
   @Test
   void onlyOneInstanceHoldsALockPerWindow() {
     LockConfiguration cfg =
-        new LockConfiguration(Instant.now(), "it-shedlock-probe", Duration.ofMinutes(5), Duration.ZERO);
+        new LockConfiguration(
+            Instant.now(), "it-shedlock-probe", Duration.ofMinutes(5), Duration.ZERO);
 
     Optional<SimpleLock> first = lockProvider.lock(cfg);
     assertTrue(first.isPresent(), "the first acquisition of a free lock must succeed");

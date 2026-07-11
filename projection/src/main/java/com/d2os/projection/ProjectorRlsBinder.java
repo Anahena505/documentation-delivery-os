@@ -1,10 +1,9 @@
 package com.d2os.projection;
 
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
-
-import java.util.UUID;
 
 /**
  * {@code d2os_projector}-side equivalent of {@code com.d2os.tenancy.security.WorkspaceRlsBinder}
@@ -22,16 +21,18 @@ import java.util.UUID;
 @Component
 public class ProjectorRlsBinder {
 
-    private final JdbcTemplate projectorJdbcTemplate;
+  private final JdbcTemplate projectorJdbcTemplate;
 
-    public ProjectorRlsBinder(@Qualifier("projectorJdbcTemplate") JdbcTemplate projectorJdbcTemplate) {
-        this.projectorJdbcTemplate = projectorJdbcTemplate;
-    }
+  public ProjectorRlsBinder(
+      @Qualifier("projectorJdbcTemplate") JdbcTemplate projectorJdbcTemplate) {
+    this.projectorJdbcTemplate = projectorJdbcTemplate;
+  }
 
-    public void bindCurrentTransaction(UUID workspaceId) {
-        // workspaceId is a validated UUID (never user-controlled free text), so literal
-        // interpolation is safe here; set_config's parameterized form can't be used for the SET
-        // target anyway (same reasoning as WorkspaceRlsBinder).
-        projectorJdbcTemplate.execute("SELECT set_config('app.workspace_id', '" + workspaceId + "', true)");
-    }
+  public void bindCurrentTransaction(UUID workspaceId) {
+    // workspaceId is a validated UUID (never user-controlled free text), so literal
+    // interpolation is safe here; set_config's parameterized form can't be used for the SET
+    // target anyway (same reasoning as WorkspaceRlsBinder).
+    projectorJdbcTemplate.execute(
+        "SELECT set_config('app.workspace_id', '" + workspaceId + "', true)");
+  }
 }

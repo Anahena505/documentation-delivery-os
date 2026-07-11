@@ -1,9 +1,8 @@
 package com.d2os.tenancy.security;
 
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
-
-import java.util.UUID;
 
 /**
  * Binds the RLS workspace variable onto the <em>current transaction's</em> connection (T045).
@@ -21,15 +20,15 @@ import java.util.UUID;
 @Component
 public class WorkspaceRlsBinder {
 
-    private final JdbcTemplate jdbcTemplate;
+  private final JdbcTemplate jdbcTemplate;
 
-    public WorkspaceRlsBinder(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
-    }
+  public WorkspaceRlsBinder(JdbcTemplate jdbcTemplate) {
+    this.jdbcTemplate = jdbcTemplate;
+  }
 
-    public void bindCurrentTransaction(UUID workspaceId) {
-        // workspaceId is a validated UUID (never user-controlled free text), so literal interpolation
-        // is safe here; set_config's parameterized form can't be used for the SET target anyway.
-        jdbcTemplate.execute("SELECT set_config('app.workspace_id', '" + workspaceId + "', true)");
-    }
+  public void bindCurrentTransaction(UUID workspaceId) {
+    // workspaceId is a validated UUID (never user-controlled free text), so literal interpolation
+    // is safe here; set_config's parameterized form can't be used for the SET target anyway.
+    jdbcTemplate.execute("SELECT set_config('app.workspace_id', '" + workspaceId + "', true)");
+  }
 }

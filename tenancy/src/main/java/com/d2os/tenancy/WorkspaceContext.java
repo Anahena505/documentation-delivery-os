@@ -11,28 +11,31 @@ import java.util.UUID;
  */
 public final class WorkspaceContext {
 
-    private static final ThreadLocal<UUID> CURRENT = new ThreadLocal<>();
+  private static final ThreadLocal<UUID> CURRENT = new ThreadLocal<>();
 
-    private WorkspaceContext() {}
+  private WorkspaceContext() {}
 
-    public static void set(UUID workspaceId) {
-        CURRENT.set(workspaceId);
+  public static void set(UUID workspaceId) {
+    CURRENT.set(workspaceId);
+  }
+
+  public static UUID require() {
+    UUID id = CURRENT.get();
+    if (id == null) {
+      throw new IllegalStateException(
+          "No workspace bound to the current request (T010 not engaged?)");
     }
+    return id;
+  }
 
-    public static UUID require() {
-        UUID id = CURRENT.get();
-        if (id == null) {
-            throw new IllegalStateException("No workspace bound to the current request (T010 not engaged?)");
-        }
-        return id;
-    }
+  /**
+   * @return the bound workspace id, or null if none is bound (e.g. a startup-time job).
+   */
+  public static UUID currentOrNull() {
+    return CURRENT.get();
+  }
 
-    /** @return the bound workspace id, or null if none is bound (e.g. a startup-time job). */
-    public static UUID currentOrNull() {
-        return CURRENT.get();
-    }
-
-    public static void clear() {
-        CURRENT.remove();
-    }
+  public static void clear() {
+    CURRENT.remove();
+  }
 }

@@ -1,5 +1,9 @@
 package com.d2os.testsupport;
 
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
@@ -7,188 +11,217 @@ import com.tngtech.archunit.core.domain.properties.CanBeAnnotated;
 import com.tngtech.archunit.lang.ArchRule;
 import org.springframework.stereotype.Component;
 
-import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
-import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
-import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
-
 /**
  * Module-boundary rules (T005; Phase 3 T039) enforcing constitution invariants at
- * compile-time-adjacent test time:
- *  - Personas never call each other (AD-8 / FR-017).
- *  - Only the persona.gateway package may reach provider SDKs (AS-5, Principle II).
- *  - persona never depends on knowledge — retrieval flows only through the persona-owned
- *    {@code KnowledgeProvider} SPI, keeping the module graph acyclic (research R1).
- *  - persona execution beans hold no mutable instance state, and the execution machinery never
- *    recurses into another persona's execution (Phase 2 T051, FR-018).
- * Applied over the full {@code com.d2os} classpath by {@code ArchitectureRulesTest} in the app module.
+ * compile-time-adjacent test time: - Personas never call each other (AD-8 / FR-017). - Only the
+ * persona.gateway package may reach provider SDKs (AS-5, Principle II). - persona never depends on
+ * knowledge — retrieval flows only through the persona-owned {@code KnowledgeProvider} SPI, keeping
+ * the module graph acyclic (research R1). - persona execution beans hold no mutable instance state,
+ * and the execution machinery never recurses into another persona's execution (Phase 2 T051,
+ * FR-018). Applied over the full {@code com.d2os} classpath by {@code ArchitectureRulesTest} in the
+ * app module.
  */
 public final class ArchitectureRules {
 
-    private ArchitectureRules() {}
+  private ArchitectureRules() {}
 
-    /** No class under one persona package may depend on another persona's internals (AD-8). */
-    public static ArchRule personaNoPeerCalls() {
-        return noClasses()
-            .that().resideInAPackage("..persona..")
-            .should().dependOnClassesThat().resideInAPackage("..persona.impl..")
-            .because("personas are stateless and never call one another (AD-8, FR-017)");
-    }
+  /** No class under one persona package may depend on another persona's internals (AD-8). */
+  public static ArchRule personaNoPeerCalls() {
+    return noClasses()
+        .that()
+        .resideInAPackage("..persona..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAPackage("..persona.impl..")
+        .because("personas are stateless and never call one another (AD-8, FR-017)");
+  }
 
-    /** Only the AI Gateway may talk to provider SDKs (single choke point). */
-    public static ArchRule onlyGatewayCallsProviders() {
-        return noClasses()
-            .that().resideOutsideOfPackage("..persona.gateway..")
-            .should().dependOnClassesThat().resideInAnyPackage("com.anthropic..", "com.openai..")
-            .because("the AI Gateway is the sole provider call site (AS-5, Principle II)");
-    }
+  /** Only the AI Gateway may talk to provider SDKs (single choke point). */
+  public static ArchRule onlyGatewayCallsProviders() {
+    return noClasses()
+        .that()
+        .resideOutsideOfPackage("..persona.gateway..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAnyPackage("com.anthropic..", "com.openai..")
+        .because("the AI Gateway is the sole provider call site (AS-5, Principle II)");
+  }
 
-    /**
-     * The persona → knowledge arrow is forbidden (Phase 3, T039, research R1): {@code knowledge}
-     * implements persona's {@code KnowledgeProvider} SPI, so the dependency must stay one-way
-     * (knowledge → persona). A persona class reaching into {@code com.d2os.knowledge} would create a
-     * module cycle and let the hot path bypass the SPI seam.
-     */
-    public static ArchRule personaDoesNotDependOnKnowledge() {
-        return noClasses()
-            .that().resideInAPackage("com.d2os.persona..")
-            .should().dependOnClassesThat().resideInAPackage("com.d2os.knowledge..")
-            .because("retrieval flows only through the KnowledgeProvider SPI; "
-                    + "the module graph is acyclic: knowledge -> persona, never back (research R1)");
-    }
+  /**
+   * The persona → knowledge arrow is forbidden (Phase 3, T039, research R1): {@code knowledge}
+   * implements persona's {@code KnowledgeProvider} SPI, so the dependency must stay one-way
+   * (knowledge → persona). A persona class reaching into {@code com.d2os.knowledge} would create a
+   * module cycle and let the hot path bypass the SPI seam.
+   */
+  public static ArchRule personaDoesNotDependOnKnowledge() {
+    return noClasses()
+        .that()
+        .resideInAPackage("com.d2os.persona..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAPackage("com.d2os.knowledge..")
+        .because(
+            "retrieval flows only through the KnowledgeProvider SPI; "
+                + "the module graph is acyclic: knowledge -> persona, never back (research R1)");
+  }
 
-    /**
-     * The persona → intake (attachment raw-storage) arrow is forbidden (Phase 2 US5, T050, FR-015).
-     * Persona receives attachment context only as sanitized summaries through the persona-owned
-     * {@code AttachmentSummaryPort} SPI (implemented by intake); it must never reach into the intake
-     * attachment package, which owns the raw uploaded bytes and the extraction pipeline. A persona
-     * class touching {@code com.d2os.intake} would let a persona read raw attachment content, defeating
-     * the sandbox boundary, and would invert the dependency (intake → persona, never back).
-     */
-    public static ArchRule personaDoesNotDependOnAttachmentStorage() {
-        return noClasses()
-            .that().resideInAPackage("com.d2os.persona..")
-            .should().dependOnClassesThat().resideInAPackage("com.d2os.intake..")
-            .because("attachment context reaches a persona only as sanitized summaries via the "
-                    + "AttachmentSummaryPort SPI; persona never touches the raw-storage path (FR-015)");
-    }
+  /**
+   * The persona → intake (attachment raw-storage) arrow is forbidden (Phase 2 US5, T050, FR-015).
+   * Persona receives attachment context only as sanitized summaries through the persona-owned
+   * {@code AttachmentSummaryPort} SPI (implemented by intake); it must never reach into the intake
+   * attachment package, which owns the raw uploaded bytes and the extraction pipeline. A persona
+   * class touching {@code com.d2os.intake} would let a persona read raw attachment content,
+   * defeating the sandbox boundary, and would invert the dependency (intake → persona, never back).
+   */
+  public static ArchRule personaDoesNotDependOnAttachmentStorage() {
+    return noClasses()
+        .that()
+        .resideInAPackage("com.d2os.persona..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAPackage("com.d2os.intake..")
+        .because(
+            "attachment context reaches a persona only as sanitized summaries via the "
+                + "AttachmentSummaryPort SPI; persona never touches the raw-storage path (FR-015)");
+  }
 
-    /**
-     * Persona execution beans hold no mutable instance state (Phase 2, T051, FR-018): a Spring-managed
-     * class ({@code @Component}/{@code @Service}) in the persona module must not carry a reassignable
-     * field, because case-specific state living across invocations would let one Case's execution
-     * silently leak into another's — every {@code PersonaEnvelope}-adjacent class is built fresh per
-     * invocation instead (T029, AD-8). {@code beFinal()} permits a final reference to a thread-safe,
-     * internally-mutable structure (e.g. {@code WorkspaceRateLimiter}'s per-workspace rate windows) —
-     * that is a bounded cross-cutting guard, not persona execution state — while forbidding the field
-     * itself from ever being reassigned. JPA entities (the runtime rows, which legitimately mutate) are
-     * a different concern entirely and are not Spring-stereotype beans, so they fall outside this rule.
-     */
-    public static ArchRule personaExecutionBeansHoldNoMutableState() {
-        // metaAnnotatedWith (not annotatedWith) so @Service resolves too: Spring's @Service is itself
-        // meta-annotated with @Component, and this single predicate catches any current or future
-        // stereotype (@Repository, @Controller, ...) without needing to OR every one by hand.
-        DescribedPredicate<JavaClass> springBeanInPersonaModule =
-                resideInAPackage("com.d2os.persona..")
-                        .and(CanBeAnnotated.Predicates.metaAnnotatedWith(Component.class));
-        return fields()
-            .that().areDeclaredInClassesThat(springBeanInPersonaModule)
-            .should().beFinal()
-            .because("persona execution beans are stateless — every field is set once at construction "
-                    + "and never reassigned, so no Case's execution can leak state into another's (AD-8, FR-018)");
-    }
+  /**
+   * Persona execution beans hold no mutable instance state (Phase 2, T051, FR-018): a
+   * Spring-managed class ({@code @Component}/{@code @Service}) in the persona module must not carry
+   * a reassignable field, because case-specific state living across invocations would let one
+   * Case's execution silently leak into another's — every {@code PersonaEnvelope}-adjacent class is
+   * built fresh per invocation instead (T029, AD-8). {@code beFinal()} permits a final reference to
+   * a thread-safe, internally-mutable structure (e.g. {@code WorkspaceRateLimiter}'s per-workspace
+   * rate windows) — that is a bounded cross-cutting guard, not persona execution state — while
+   * forbidding the field itself from ever being reassigned. JPA entities (the runtime rows, which
+   * legitimately mutate) are a different concern entirely and are not Spring-stereotype beans, so
+   * they fall outside this rule.
+   */
+  public static ArchRule personaExecutionBeansHoldNoMutableState() {
+    // metaAnnotatedWith (not annotatedWith) so @Service resolves too: Spring's @Service is itself
+    // meta-annotated with @Component, and this single predicate catches any current or future
+    // stereotype (@Repository, @Controller, ...) without needing to OR every one by hand.
+    DescribedPredicate<JavaClass> springBeanInPersonaModule =
+        resideInAPackage("com.d2os.persona..")
+            .and(CanBeAnnotated.Predicates.metaAnnotatedWith(Component.class));
+    return fields()
+        .that()
+        .areDeclaredInClassesThat(springBeanInPersonaModule)
+        .should()
+        .beFinal()
+        .because(
+            "persona execution beans are stateless — every field is set once at construction "
+                + "and never reassigned, so no Case's execution can leak state into another's (AD-8, FR-018)");
+  }
 
-    /**
-     * The persona execution machinery never recurses into another persona's execution (Phase 2, T051,
-     * AD-8, FR-018): none of the classes that make up one persona step's call graph — envelope build
-     * ({@code com.d2os.persona}) through the gateway call ({@code com.d2os.persona.gateway}) — may
-     * themselves call back into {@code PersonaExecutionService}. Only code OUTSIDE that call graph may
-     * trigger a persona's execution: the orchestration module's BPMN delegates (the normal case), and
-     * top-level gate services like {@code ConsistencyService} (a distinct pipeline step that happens to
-     * run the {@code consistency-reviewer} persona as one of its two tiers — it is invoked BY
-     * orchestration, not FROM WITHIN another persona's execution, so it is intentionally outside the
-     * scoped packages here rather than excluded by name).
-     */
-    public static ArchRule personaExecutionMachineryNeverRecursesIntoAnotherPersona() {
-        DescribedPredicate<JavaClass> executionMachinery =
-                (resideInAPackage("com.d2os.persona").or(resideInAPackage("com.d2os.persona.gateway")))
-                        .and(DescribedPredicate.not(JavaClass.Predicates.simpleName("PersonaExecutionService")));
-        return noClasses()
-            .that(executionMachinery)
-            .should().dependOnClassesThat().haveSimpleName("PersonaExecutionService")
-            .because("a persona step's own execution machinery (envelope build -> render -> gateway "
-                    + "call -> validate -> record) must never itself trigger another persona's execution "
-                    + "(AD-8, FR-018) — only orchestration delegates and top-level gate services may");
-    }
+  /**
+   * The persona execution machinery never recurses into another persona's execution (Phase 2, T051,
+   * AD-8, FR-018): none of the classes that make up one persona step's call graph — envelope build
+   * ({@code com.d2os.persona}) through the gateway call ({@code com.d2os.persona.gateway}) — may
+   * themselves call back into {@code PersonaExecutionService}. Only code OUTSIDE that call graph
+   * may trigger a persona's execution: the orchestration module's BPMN delegates (the normal case),
+   * and top-level gate services like {@code ConsistencyService} (a distinct pipeline step that
+   * happens to run the {@code consistency-reviewer} persona as one of its two tiers — it is invoked
+   * BY orchestration, not FROM WITHIN another persona's execution, so it is intentionally outside
+   * the scoped packages here rather than excluded by name).
+   */
+  public static ArchRule personaExecutionMachineryNeverRecursesIntoAnotherPersona() {
+    DescribedPredicate<JavaClass> executionMachinery =
+        (resideInAPackage("com.d2os.persona").or(resideInAPackage("com.d2os.persona.gateway")))
+            .and(
+                DescribedPredicate.not(JavaClass.Predicates.simpleName("PersonaExecutionService")));
+    return noClasses()
+        .that(executionMachinery)
+        .should()
+        .dependOnClassesThat()
+        .haveSimpleName("PersonaExecutionService")
+        .because(
+            "a persona step's own execution machinery (envelope build -> render -> gateway "
+                + "call -> validate -> record) must never itself trigger another persona's execution "
+                + "(AD-8, FR-018) — only orchestration delegates and top-level gate services may");
+  }
 
-    /**
-     * {@code governance} stays engine-agnostic (Phase 5 plan.md Structure Decision, Phase 9 T048):
-     * no class in the module may depend on Flowable directly. Engine coupling is confined to
-     * {@code orchestration}'s bridge classes ({@code GateTaskBridge}, {@code TimerEscalationDelegate},
-     * {@code ReopenDmnPortImpl}, {@code EngineGateReleasePortImpl}) — each implements a port
-     * {@code governance} defines ({@code EngineGateReleasePort}, {@code ReopenDmnPort}) or reaches
-     * INTO governance's services from the engine side, never the other way around.
-     */
-    public static ArchRule governanceHasNoFlowableDependency() {
-        return noClasses()
-            .that().resideInAPackage("com.d2os.governance..")
-            .should().dependOnClassesThat().resideInAnyPackage("org.flowable..")
-            .because("governance is engine-agnostic by design — engine coupling is confined to "
-                    + "orchestration's bridge classes, which implement governance-owned SPI ports "
-                    + "rather than governance reaching into Flowable directly (plan.md Structure Decision)");
-    }
+  /**
+   * {@code governance} stays engine-agnostic (Phase 5 plan.md Structure Decision, Phase 9 T048): no
+   * class in the module may depend on Flowable directly. Engine coupling is confined to {@code
+   * orchestration}'s bridge classes ({@code GateTaskBridge}, {@code TimerEscalationDelegate},
+   * {@code ReopenDmnPortImpl}, {@code EngineGateReleasePortImpl}) — each implements a port {@code
+   * governance} defines ({@code EngineGateReleasePort}, {@code ReopenDmnPort}) or reaches INTO
+   * governance's services from the engine side, never the other way around.
+   */
+  public static ArchRule governanceHasNoFlowableDependency() {
+    return noClasses()
+        .that()
+        .resideInAPackage("com.d2os.governance..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAnyPackage("org.flowable..")
+        .because(
+            "governance is engine-agnostic by design — engine coupling is confined to "
+                + "orchestration's bridge classes, which implement governance-owned SPI ports "
+                + "rather than governance reaching into Flowable directly (plan.md Structure Decision)");
+  }
 
-    /**
-     * {@code catalog} domain services stay UI-agnostic (Phase 6 US5, T031): no class in {@code
-     * com.d2os.catalog} may depend on {@code com.d2os.studio}. Structurally guaranteed already by
-     * {@code catalog/build.gradle} carrying no dependency on {@code studio} (the reverse direction —
-     * {@code studio} depends on {@code catalog} — is the only edge that exists), but pinned here as
-     * an explicit, always-checked invariant rather than an implicit consequence of the module graph
-     * (same value proposition as {@link #governanceHasNoFlowableDependency}): every catalog semantic
-     * (draft/publish/fork/deprecate/subscribe/compatibility) stays API-testable without a Thymeleaf
-     * context, and {@code studio} stays presentation-only.
-     */
-    public static ArchRule catalogDoesNotDependOnStudio() {
-        return noClasses()
-            .that().resideInAPackage("com.d2os.catalog..")
-            .should().dependOnClassesThat().resideInAPackage("com.d2os.studio..")
-            .because("catalog domain services (DraftService, ForkService, DeprecationImpactService, "
-                    + "CompatibilityMatrixService, SubscriptionService) are UI-agnostic — studio is "
-                    + "presentation-only, layered strictly on top of catalog (PublishService lives in "
-                    + "studio itself, not catalog, precisely because it also needs governance)");
-    }
+  /**
+   * {@code catalog} domain services stay UI-agnostic (Phase 6 US5, T031): no class in {@code
+   * com.d2os.catalog} may depend on {@code com.d2os.studio}. Structurally guaranteed already by
+   * {@code catalog/build.gradle} carrying no dependency on {@code studio} (the reverse direction —
+   * {@code studio} depends on {@code catalog} — is the only edge that exists), but pinned here as
+   * an explicit, always-checked invariant rather than an implicit consequence of the module graph
+   * (same value proposition as {@link #governanceHasNoFlowableDependency}): every catalog semantic
+   * (draft/publish/fork/deprecate/subscribe/compatibility) stays API-testable without a Thymeleaf
+   * context, and {@code studio} stays presentation-only.
+   */
+  public static ArchRule catalogDoesNotDependOnStudio() {
+    return noClasses()
+        .that()
+        .resideInAPackage("com.d2os.catalog..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAPackage("com.d2os.studio..")
+        .because(
+            "catalog domain services (DraftService, ForkService, DeprecationImpactService, "
+                + "CompatibilityMatrixService, SubscriptionService) are UI-agnostic — studio is "
+                + "presentation-only, layered strictly on top of catalog (PublishService lives in "
+                + "studio itself, not catalog, precisely because it also needs governance)");
+  }
 
-    /**
-     * {@code projection} is the sole writer of the five graph/projector-owned tables (Phase 7
-     * research R2, Principle III): no class outside {@code com.d2os.projection} may depend on
-     * {@code GraphWriteRepository}, the one class whose {@code JdbcTemplate} is bound to the
-     * {@code d2os_projector} role that actually holds INSERT/UPDATE/DELETE grants on {@code
-     * graph_node}/{@code graph_edge}/{@code projection_checkpoint}/{@code projection_state}/{@code
-     * projection_gap} (V28's REVOKE strips those grants from {@code d2os_app} outright). Already
-     * structurally guaranteed today — no other module's {@code build.gradle} depends on {@code
-     * projection} at all (only {@code app} does) — but pinned explicitly anyway, same value
-     * proposition as {@link #catalogDoesNotDependOnStudio} and {@link
-     * #governanceHasNoFlowableDependency}: an explicit, always-checked signal rather than an
-     * implicit consequence of today's module graph.
-     */
-    public static ArchRule projectionIsSoleWriterOfGraphTables() {
-        return noClasses()
-            .that().resideOutsideOfPackage("com.d2os.projection..")
-            .should().dependOnClassesThat().haveSimpleName("GraphWriteRepository")
-            .because("the projector (via GraphWriteRepository, the sole d2os_projector-bound write "
-                    + "path) is the only writer of the derived graph tables — every other module reads "
-                    + "them, at most, through the SELECT-only-granted app datasource (research R2, "
-                    + "Principle III)");
-    }
+  /**
+   * {@code projection} is the sole writer of the five graph/projector-owned tables (Phase 7
+   * research R2, Principle III): no class outside {@code com.d2os.projection} may depend on {@code
+   * GraphWriteRepository}, the one class whose {@code JdbcTemplate} is bound to the {@code
+   * d2os_projector} role that actually holds INSERT/UPDATE/DELETE grants on {@code
+   * graph_node}/{@code graph_edge}/{@code projection_checkpoint}/{@code projection_state}/{@code
+   * projection_gap} (V28's REVOKE strips those grants from {@code d2os_app} outright). Already
+   * structurally guaranteed today — no other module's {@code build.gradle} depends on {@code
+   * projection} at all (only {@code app} does) — but pinned explicitly anyway, same value
+   * proposition as {@link #catalogDoesNotDependOnStudio} and {@link
+   * #governanceHasNoFlowableDependency}: an explicit, always-checked signal rather than an implicit
+   * consequence of today's module graph.
+   */
+  public static ArchRule projectionIsSoleWriterOfGraphTables() {
+    return noClasses()
+        .that()
+        .resideOutsideOfPackage("com.d2os.projection..")
+        .should()
+        .dependOnClassesThat()
+        .haveSimpleName("GraphWriteRepository")
+        .because(
+            "the projector (via GraphWriteRepository, the sole d2os_projector-bound write "
+                + "path) is the only writer of the derived graph tables — every other module reads "
+                + "them, at most, through the SELECT-only-granted app datasource (research R2, "
+                + "Principle III)");
+  }
 
-    public static void checkAll(JavaClasses importedClasses) {
-        personaNoPeerCalls().check(importedClasses);
-        onlyGatewayCallsProviders().check(importedClasses);
-        personaDoesNotDependOnKnowledge().check(importedClasses);
-        personaDoesNotDependOnAttachmentStorage().check(importedClasses);
-        personaExecutionBeansHoldNoMutableState().check(importedClasses);
-        personaExecutionMachineryNeverRecursesIntoAnotherPersona().check(importedClasses);
-        governanceHasNoFlowableDependency().check(importedClasses);
-        catalogDoesNotDependOnStudio().check(importedClasses);
-        projectionIsSoleWriterOfGraphTables().check(importedClasses);
-    }
+  public static void checkAll(JavaClasses importedClasses) {
+    personaNoPeerCalls().check(importedClasses);
+    onlyGatewayCallsProviders().check(importedClasses);
+    personaDoesNotDependOnKnowledge().check(importedClasses);
+    personaDoesNotDependOnAttachmentStorage().check(importedClasses);
+    personaExecutionBeansHoldNoMutableState().check(importedClasses);
+    personaExecutionMachineryNeverRecursesIntoAnotherPersona().check(importedClasses);
+    governanceHasNoFlowableDependency().check(importedClasses);
+    catalogDoesNotDependOnStudio().check(importedClasses);
+    projectionIsSoleWriterOfGraphTables().check(importedClasses);
+  }
 }
