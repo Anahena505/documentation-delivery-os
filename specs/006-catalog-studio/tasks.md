@@ -131,13 +131,104 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Independent Test**: Advance a prompt draft that changes a published prompt to InReview, confirm the reviewer sees a rendered text diff against the prior version, approve through D4, publish with computed checksum + enforced semver; then attempt a MAJOR publish and confirm it is held until the architecture-board gate passes.
 
-- [ ] T013 [US2] Implement submit-for-review (`POST /catalog/drafts/{draftId}/submit-review`): flip `Draft → InReview`, pin content hash, and open a Phase 5 approval-gate instance with subject `('DEFINITION_VERSION', id)` (Catalog Owner role per Q8/FR-009) in `studio/src/main/java/com/d2os/studio/PublishController.java` (FR-004, research R3)
-- [ ] T014 [P] [US2] Produce the prompt/content DeltaReport as first-class review content — reuse the Phase 5 `DeltaReportService` to diff prompt text against the prior published version for Prompt/Persona; canonical-JSON content diff fallback for non-prompt types — attached as the gate's `inputs_ref` in `catalog/src/main/java/com/d2os/catalog/PublishService.java` (FR-005, T4-c)
-- [ ] T015 [P] [US2] Render the DeltaReport via the diff2html island in the review Thymeleaf page (first-class review content, not a raw payload) in `studio/src/main/resources/templates/studio/review.html` (FR-005)
-- [ ] T016 [US2] Implement `PublishService.publish` (`catalog/src/main/java/com/d2os/catalog/PublishService.java`): require D4 gate PASS, verify the pinned content hash, compute + record checksum, enforce semver ordering against the prior published `(type,key)` version, surface duplicate `(type,key,version)` / checksum / hash-tamper conflicts (never overwrite the immutable published row), and write the `Published` flip + AuditEntry in one transaction (publish is an audited event) — FR-006/008/017/018, SC-003
-- [ ] T017 [US2] Add the MAJOR-version second gate: detect a MAJOR semver diff against the prior published version and chain a second architecture-board-role approval gate — publish requires BOTH PASS — in `PublishService` / `PublishController` (FR-007, SC-004, research R3)
-- [ ] T018 [US2] Wire the publish endpoint (`POST /catalog/drafts/{draftId}/publish`, 409 on gate-not-passed / semver-checksum conflict / hash mismatch) in `studio/src/main/java/com/d2os/studio/PublishController.java` (FR-006, US2)
-- [ ] T019 [US2] Add `PublishGovernanceIT` in `app/src/test/java/com/d2os/app/PublishGovernanceIT.java`: submit-review opens D4 + renders the prompt diff; edit-while-InReview → 409, publish-before-gate → 409; D4 APPROVE (Catalog Owner) → Published with checksum + V3 trigger lock + a publish AuditEntry in the audit trail (FR-017); duplicate `(type,key,version)` / unordered semver / changed content-hash each → 409; MAJOR draft opens two gates and stays blocked until the architecture-board gate passes; non-prompt type gets the canonical content-diff fallback (SC-002, SC-003, SC-004)
+- [X] T013 [US2] Implement submit-for-review (`POST /catalog/drafts/{draftId}/submit-review`): flip `Draft → InReview`, pin content hash, and open a Phase 5 approval-gate instance with subject `('DEFINITION_VERSION', id)` (Catalog Owner role per Q8/FR-009) in `studio/src/main/java/com/d2os/studio/PublishController.java` (FR-004, research R3)
+      **Module-placement deviation from the literal plan.md file list (verified, not assumed)**:
+      plan.md names `catalog/.../PublishService.java`, but `governance`'s own `build.gradle`
+      already declares `implementation project(':catalog')` — a `catalog -> governance` edge would
+      close a cycle. The orchestration (`submitForReview`, needing both `catalog`'s `DraftService`/
+      `DefinitionAsset` AND `governance`'s `GateService`/`DeltaReportService`) lives in
+      `studio/src/main/java/com/d2os/studio/PublishService.java` instead — `studio` already depends
+      on both. `catalog` gained only two small, self-contained additions:
+      `DefinitionAsset#pinContentHash`/`#markPublishedFromReview` (entity guards, same style as
+      the existing `updateBody`/`markInReview`) and a new public `ChecksumUtil` (sha256, extracted
+      from `DefinitionPublishService`'s private one so callers outside `catalog` don't duplicate
+      it). `DefinitionPublishService` itself is untouched. Also required, discovered only once gate
+      opening was attempted against a real schema: `gate_instance.case_instance_id` was `NOT NULL`
+      (V20) — a catalog publish-review gate has no owning Case — so `governance/.../V27__gate_instance_case_optional.sql`
+      relaxes it (column-only, FK kept, same pattern as casecore's V19 for `decision.case_instance_id`),
+      with null-safety fixes to `GateService.requireNotSelfReview`, `GateEventPublisher.basePayload`,
+      and `GateController.list`'s case-id filter (all previously assumed a non-null case id).
+- [X] T014 [P] [US2] Produce the prompt/content DeltaReport as first-class review content — reuse the Phase 5 `DeltaReportService` to diff prompt text against the prior published version for Prompt/Persona; canonical-JSON content diff fallback for non-prompt types — attached as the gate's `inputs_ref` in `catalog/src/main/java/com/d2os/catalog/PublishService.java` (FR-005, T4-c)
+      Implemented as `DeltaReportService.generateForDefinitions` (governance — extends the existing
+      service rather than duplicating it, per the phase brief) plus a new `DeltaReport` constructor
+      for V26's definition-pair shape. One code path serves BOTH "prompt diff" and "canonical-JSON
+      content diff" (both bodies are pretty-printed JSON text — diffing the pretty-printed whole
+      body makes a Prompt's `template` field change just as legible as any other field's, without a
+      separate prompt-specific extraction path — documented simplification, not a type-blind
+      oversight). Skips generation entirely (documented in the gate's `inputsRef.deltaNote`, not
+      silently) when no prior published version exists: `chk_delta_report_subject_shape` (V26)
+      requires BOTH `from_definition_id`/`to_definition_id` non-null, so a first-ever publish has no
+      legal "diff against nothing" row to write — the task brief's third option, chosen and
+      documented. Verified `GateController`'s `GET /gates/{id}/delta-report` is shape-agnostic (it
+      was — resolves whatever `DeltaReport` the gate's `deltaReportId` points at either way) and
+      extended `DeltaReportView`/`GateDetail` to also surface `fromDefinitionId`/`toDefinitionId`
+      and `subjectType`/`subjectId`, which the old DTOs omitted.
+- [X] T015 [P] [US2] Render the DeltaReport via the diff2html island in the review Thymeleaf page (first-class review content, not a raw payload) in `studio/src/main/resources/templates/studio/review.html` (FR-005)
+      `studio/src/main/resources/templates/studio/review.html` + a new `ReviewPageController`
+      (`GET /studio/review/{gateId}`) reading `GateInstanceRepository`/`DeltaReportRepository`/
+      `DefinitionAssetRepository` directly. **Honest gap, same as T002/T011's own flagged
+      limitation**: diff2html itself is not vendored in this sandbox (no outbound internet access)
+      — the page references `/studio/vendor/diff2html/diff2html.min.{js,css}` and passes the raw
+      unified-diff text into the model via a hidden `<pre>` element (avoids splicing untrusted/large
+      diff text into inline JS), with a script block that calls `Diff2Html.html(...)` guarded by
+      `typeof Diff2Html === 'undefined'` — inert until a network-enabled step drops the real files
+      in, then "just works" with no template change, same posture as `draft-edit.html`'s dmn-js
+      container.
+- [X] T016 [US2] Implement `PublishService.publish` (`catalog/src/main/java/com/d2os/catalog/PublishService.java`): require D4 gate PASS, verify the pinned content hash, compute + record checksum, enforce semver ordering against the prior published `(type,key)` version, surface duplicate `(type,key,version)` / checksum / hash-tamper conflicts (never overwrite the immutable published row), and write the `Published` flip + AuditEntry in one transaction (publish is an audited event) — FR-006/008/017/018, SC-003
+      Same module-placement resolution as T013 — `studio/src/main/java/com/d2os/studio/PublishService.java`,
+      not `catalog`. Requires EVERY `GateInstance` found for the draft's `(DEFINITION_VERSION,
+      draftId)` subject to be `APPROVED` (not a hardcoded count — covers both the one-gate and
+      T017's two-gate case uniformly); re-verifies the pinned hash via
+      `DefinitionAsset#markPublishedFromReview` (entity-level guard); enforces semver ordering via a
+      new `SemVer` helper (no semver utility existed in the repo — `DefinitionResolutionService`'s
+      own javadoc flags plain lexical ordering as a known gap); writes the checksum + `Published`
+      flip + `AuditWriter.record(..., "DEFINITION_PUBLISHED", ...)` in the one `@Transactional`
+      method. Reuses `casecore.AuditWriter` exactly as `governance` does (same dependency, already
+      present on `studio`'s classpath). **Honest gap**: "duplicate `(type,key,version)` at publish"
+      is defensively caught (`DataIntegrityViolationException` -> 409) but is not known to be
+      reachable through the normal flow — `uq_definition_type_key_version` (V3) is a GLOBAL
+      constraint with no workspace component, so a genuine duplicate tuple is already refused at
+      draft CREATE time (T008), before a row could ever reach InReview/publish holding a colliding
+      tuple; `PublishGovernanceIT` exercises the actually-reachable create-time form and documents
+      why.
+- [X] T017 [US2] Add the MAJOR-version second gate: detect a MAJOR semver diff against the prior published version and chain a second architecture-board-role approval gate — publish requires BOTH PASS — in `PublishService` / `PublishController` (FR-007, SC-004, research R3)
+      `SemVer.isMajorBump` against the prior published version at submit-review time opens a second
+      `APPROVAL` gate (`catalog-architecture-board-review`, role `d2os.studio.roles.architecture-board`,
+      T003) alongside the always-opened D4 gate; both share the same `(DEFINITION_VERSION, draftId)`
+      subject. `publish()`'s "every gate APPROVED" check (T016) needs no MAJOR-specific branch — it
+      naturally requires both. **Honest scope note**: the configured role keys are recorded in each
+      gate's `inputsRef` for display/documentation but are NOT enforced as actor-level authorization
+      on `GateService.decide` — matching `GateController`'s own documented "no role model in the
+      codebase yet" posture; any actor able to call `POST /gates/{id}/decision` can decide either
+      gate today, same as every other gate in this codebase. Real per-gate role authorization is a
+      later hardening pass, not invented here.
+- [X] T018 [US2] Wire the publish endpoint (`POST /catalog/drafts/{draftId}/publish`, 409 on gate-not-passed / semver-checksum conflict / hash mismatch) in `studio/src/main/java/com/d2os/studio/PublishController.java` (FR-006, US2)
+      `PublishController` (new, sibling to `DraftController` per plan.md's file list, same base
+      path `/api/v1/catalog/drafts` with disjoint `/submit-review` and `/publish` sub-routes — no
+      mapping conflict) plus a new `PublishConflictException`, mapped to 409 by extending the
+      existing `DraftExceptionHandler` (T016/T018's conflicts are the same `ProblemDetail`/409 shape
+      as `DraftConflictException`, so extending rather than adding a parallel sibling handler avoids
+      duplicated boilerplate — task text explicitly allowed either).
+- [X] T019 [US2] Add `PublishGovernanceIT` in `app/src/test/java/com/d2os/app/PublishGovernanceIT.java`: submit-review opens D4 + renders the prompt diff; edit-while-InReview → 409, publish-before-gate → 409; D4 APPROVE (Catalog Owner) → Published with checksum + V3 trigger lock + a publish AuditEntry in the audit trail (FR-017); duplicate `(type,key,version)` / unordered semver / changed content-hash each → 409; MAJOR draft opens two gates and stays blocked until the architecture-board gate passes; non-prompt type gets the canonical content-diff fallback (SC-002, SC-003, SC-004)
+      8 tests: submit-review opens D4 + produces a non-empty delta report against a directly-seeded
+      prior published version (`DraftService`/`DefinitionPublishService` called straight from the
+      test thread, `DeprecationIT`'s established pattern for non-HTTP service seeding); edit-while-
+      InReview → 409 (the half `StudioAuthoringIT`, T012, explicitly deferred to this task, now that
+      T013 actually calls `markInReview()`); publish-before-gate-decided → 409; full APPROVE ->
+      publish -> `Published` + 64-char checksum + exactly one `DEFINITION_PUBLISHED` audit_entry row
+      (raw SQL assertion, matching `DeprecationIT`/`CaseRoutingIT`'s convention); duplicate
+      `(type,key,version)` exercised at its actually-reachable point (create, against an
+      already-Published row — see T016's honest gap note for why publish-time duplication isn't
+      reachable); unordered semver → 409 at publish; a body mutated via raw SQL after the hash was
+      pinned (simulating the "shouldn't be possible but check defensively" tamper scenario) → 409;
+      a MAJOR draft opens two gates, publish stays 409 after only the D4 gate is approved, and
+      succeeds only once the architecture-board gate is approved too. **Cannot actually run in this
+      environment** (no Docker, same as every prior phase's IT) — hand-traced line-by-line against
+      the real `PublishController`/`PublishService`/`GateService`/`DeltaReportService`/
+      `DefinitionAsset` code in this same commit, not asserted to pass. **Non-prompt canonical-diff
+      fallback**: not exercised as a SEPARATE scenario, because T014's implementation makes it the
+      SAME code path as the prompt case (documented there) — there is no distinct fallback branch
+      left to test independently.
 
 **Checkpoint**: US2 independently testable — publish is default-deny through the Phase 5 gate, diffs render, conflicts are surfaced, MAJOR requires the board.
 

@@ -114,6 +114,57 @@ public class DefinitionAsset {
         this.status = Status.InReview.name();
     }
 
+    /**
+     * Pin the content hash at submit-for-review (tasks.md T013, research R2's "content-hash
+     * pinned at submission" tamper guard). Deliberately reuses the {@code checksum} column rather
+     * than adding a new one: {@code checksum} is otherwise only ever written once, at publish, to
+     * exactly {@code sha256(body)} — pinning that same value the moment the body is frozen
+     * (immediately after {@link #markInReview()}) costs nothing (no reader branches on
+     * {@code checksum != null} to infer Published status; grep-verified) and gives {@link
+     * #markPublishedFromReview} a stored baseline to defensively re-check against later, exactly
+     * mirroring how a Published row's checksum is simply "the hash that was true when it was
+     * frozen." Only legal once the row has actually left Draft.
+     */
+    public void pinContentHash(String hash) {
+        if (!Status.InReview.name().equals(status)) {
+            throw new IllegalStateException(
+                    "Content hash can only be pinned once InReview; " + key + " is " + status);
+        }
+        this.checksum = hash;
+    }
+
+    /**
+     * Gate-integrated publish (tasks.md T016, US2): the InReview -&gt; Published transition once
+     * every opened {@code DEFINITION_VERSION} gate has reached {@code APPROVED} — the studio's
+     * {@code PublishService} (module placement note: lives in {@code studio}, not {@code catalog},
+     * because it also needs {@code governance}'s {@code GateInstanceRepository}, and {@code
+     * governance} already depends on {@code catalog} — a {@code catalog -&gt; governance} edge
+     * would be circular) is the only caller. {@code recomputedHash} is {@code sha256(body)}
+     * computed fresh by the caller at publish time; compared against whatever {@link
+     * #pinContentHash} recorded at submission as a tamper guard (research R2: "any tamper is
+     * detected at publish") — a mismatch can only happen if the row was mutated outside the normal
+     * {@link #updateBody} guard (e.g. a direct DB write), since the InReview freeze already blocks
+     * every ordinary edit path. This is a SEPARATE method from {@link #markPublished} (the
+     * Draft-only, no-gate {@code DefinitionPublishService} primitive {@code CatalogSeedLoader}
+     * uses) precisely so that direct-publish path is never touched by this phase (Phase 1-2's
+     * design decision) — two distinct publish primitives, two distinct guards, sharing only the
+     * {@code Status.Published} terminal assignment.
+     */
+    public void markPublishedFromReview(String recomputedHash) {
+        if (!Status.InReview.name().equals(status)) {
+            throw new IllegalStateException(
+                    "Only InReview definitions can be published via gate review; " + key + " is " + status);
+        }
+        if (checksum != null && !checksum.equals(recomputedHash)) {
+            throw new IllegalStateException(
+                    "pinned content hash mismatch for " + key + " v" + version
+                            + " — body changed after submit-for-review (tamper guard)");
+        }
+        this.checksum = recomputedHash;
+        this.status = Status.Published.name();
+        this.publishedAt = OffsetDateTime.now();
+    }
+
     public UUID getId() { return id; }
     public UUID getWorkspaceId() { return workspaceId; }
     public String getKey() { return key; }

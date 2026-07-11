@@ -169,7 +169,10 @@ public class GateService {
      * decides its own gate.
      */
     private void requireNotSelfReview(GateInstance gate, String actorId) {
-        if (actorId == null) {
+        if (actorId == null || gate.getCaseInstanceId() == null) {
+            // V27 (tasks.md T013): a DEFINITION_VERSION-subject gate (studio publish review) has no
+            // owning case to compare the actor against — self-review is a Case-submitter concept
+            // that doesn't apply to a catalog publish, so there is nothing to check here.
             return;
         }
         caseInstanceRepository.findById(gate.getCaseInstanceId()).ifPresent(kase -> {

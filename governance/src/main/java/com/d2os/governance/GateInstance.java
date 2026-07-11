@@ -42,7 +42,16 @@ public class GateInstance {
     @Column(name = "workspace_id", nullable = false)
     private UUID workspaceId;
 
-    @Column(name = "case_instance_id", nullable = false)
+    /**
+     * @deprecated-adjacent note (not deprecated, just relaxed): NOT NULL until V27 (tasks.md
+     *     T013/T017). The studio's {@code DEFINITION_VERSION}-subject publish-review gates have no
+     *     owning Case — they review a catalog definition version, never anything running inside a
+     *     workflow instance — so this column is nullable for those rows. Every
+     *     {@code ARTIFACT_REVISION}-subject gate (the only kind before Phase 6) still always sets
+     *     a real case id. Same column-only, FK-preserving relaxation casecore's V19 ({@code
+     *     decision.case_instance_id}) already established for the identical problem shape.
+     */
+    @Column(name = "case_instance_id")
     private UUID caseInstanceId;
 
     @Column(name = "gate_type", nullable = false)
