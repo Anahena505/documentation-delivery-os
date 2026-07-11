@@ -97,7 +97,10 @@ profile 2–20 s. Asserts:
   the semantic consistency reviewer is a recorded/replayable operation, and the attachment summary
   carries a complete inline reproducibility snapshot (model id/version + extracted-text/summary hashes).
 - Module boundary: `ArchitectureRulesTest` enforces `persona ⊥ intake` (no persona class may reach the
-  attachment raw-storage path — FR-015).
+  attachment raw-storage path — FR-015) and the FR-018 statelessness rules (no mutable instance state,
+  no persona-to-persona recursion).
+- `ParallelBlockIT` — runtime half of FR-018: on a real parallel+gated case, the consistency-reviewer
+  never appears as an `artifact_revision`'s producer (reviewer ≠ producer, always).
 
 ## Manual smoke (optional, against `bootRun`)
 
@@ -124,7 +127,7 @@ docker compose up -d                            # Postgres + MinIO (env-driven c
 | SC-005 | LoadPostureIT (50 concurrent, p95, zero stalls) | ☐ |
 | SC-006 | LoadPostureIT (≤5 s progress cadence) | ☐ |
 | SC-007 | AttachmentSandboxIT (raw bytes never in prompt) | ☐ |
-| SC-008 | Phase 1 suites re-run + concurrent leakage + replay of parallel case | ☐ |
+| SC-008 | Phase 1 suites re-run + concurrent leakage + replay of parallel case + reviewer≠producer (`ParallelBlockIT`) | ☐ — implemented, unverified: no Docker/Testcontainers in this delivery environment |
 
 References: entities in [data-model.md](data-model.md) · endpoints in
 [contracts/api.yaml](contracts/api.yaml) · decisions in [research.md](research.md).
