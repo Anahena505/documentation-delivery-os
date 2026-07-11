@@ -205,12 +205,29 @@ public class CycleDetector {
                         + "WHERE workspace_id = ? AND generation = ? AND edge_type = 'DEPENDS_ON'",
                 workspaceId, generation);
 
+        List<UUID[]> edges = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            edges.add(new UUID[]{(UUID) row.get("from_node"), (UUID) row.get("to_node")});
+        }
+        return detectCycles(edges);
+    }
+
+    /**
+     * Pure, JDBC-free graph logic extracted verbatim from {@link #findAllCycles} for direct unit
+     * testing (008 T007) and reuse: Kahn-style peeling to find every node on {@code >= 1} cycle,
+     * then one bounded DFS per uncovered cyclic node to name findings. Behavior-preserving
+     * extraction — see the class javadoc's "Whole-graph completeness vs. exhaustive cycle
+     * enumeration" section.
+     *
+     * @param edges each element is a {@code {fromNode, toNode}} DEPENDS_ON pair.
+     */
+    static List<List<UUID>> detectCycles(List<UUID[]> edges) {
         Map<UUID, List<UUID>> adjacency = new LinkedHashMap<>();
         Map<UUID, Integer> inDegree = new HashMap<>();
         Set<UUID> allNodes = new LinkedHashSet<>();
-        for (Map<String, Object> row : rows) {
-            UUID from = (UUID) row.get("from_node");
-            UUID to = (UUID) row.get("to_node");
+        for (UUID[] edge : edges) {
+            UUID from = edge[0];
+            UUID to = edge[1];
             adjacency.computeIfAbsent(from, k -> new ArrayList<>()).add(to);
             inDegree.merge(to, 1, Integer::sum);
             allNodes.add(from);
@@ -258,7 +275,7 @@ public class CycleDetector {
     }
 
     /** DFS with an explicit recursion stack, restricted to {@code cyclic} nodes, bounded by {@link #MAX_PATH_DEPTH}. */
-    private List<UUID> dfsFindCycle(UUID root, Map<UUID, List<UUID>> adjacency, Set<UUID> cyclic) {
+    private static List<UUID> dfsFindCycle(UUID root, Map<UUID, List<UUID>> adjacency, Set<UUID> cyclic) {
         List<UUID> stack = new ArrayList<>();
         Set<UUID> onStack = new LinkedHashSet<>();
         Deque<Iterator<UUID>> iterStack = new ArrayDeque<>();

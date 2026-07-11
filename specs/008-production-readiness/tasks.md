@@ -85,25 +85,25 @@ green; the unit tests run without Docker.
 
 ### Tests (fast unit layer — these ARE the deliverable)
 
-- [ ] T007 [P] [US1] Create `projection/src/test/java/com/d2os/projection/cycle/CycleDetectorTest.java`
+- [X] T007 [P] [US1] Create `projection/src/test/java/com/d2os/projection/cycle/CycleDetectorTest.java`
   — plain JUnit 5, NO Spring, NO Testcontainers. Test the pure graph logic of
   `projection/src/main/java/com/d2os/projection/cycle/CycleDetector.java`: (a) a 3-node cycle → every
   member node reported; (b) an acyclic graph → zero cycles; (c) a self-loop. Instantiate only the pure
   method(s); if a method needs JDBC, extract the pure Kahn/DFS portion into a package-private static
   helper first and test that. Acceptance: `/opt/gradle/bin/gradle :projection:test --tests CycleDetectorTest`
   passes in < 5 s.
-- [ ] T008 [P] [US1] Create
+- [X] T008 [P] [US1] Create
   `casecore/src/test/java/com/d2os/casecore/audit/AuditChainCanonicalizerTest.java` — pure JUnit.
   Verify `AuditChainCanonicalizer` produces identical canonical bytes for equal inputs and different
   bytes when any field changes (tamper sensitivity). Acceptance: passes without a DB.
-- [ ] T009 [P] [US1] Create
+- [X] T009 [P] [US1] Create
   `governance/src/test/java/com/d2os/governance/escalation/EscalationPolicyResolverTest.java` — pure
   JUnit. Verify step-duration resolution: policy value wins when present; configured default
   (`P3D`) used when the policy omits a step. Acceptance: passes without a DB.
-- [ ] T010 [P] [US1] Create `persona/src/test/java/com/d2os/persona/TokenBudgetGuardTest.java` — pure
+- [X] T010 [P] [US1] Create `persona/src/test/java/com/d2os/persona/TokenBudgetGuardTest.java` — pure
   JUnit. Verify the budget cap admits usage at/under the cap and rejects over the cap (boundary
   values). Acceptance: passes without a DB.
-- [ ] T011 [P] [US1] Create
+- [X] T011 [P] [US1] Create
   `persona/src/test/java/com/d2os/persona/gateway/WorkspaceScopeGuardTest.java` — pure JUnit. Verify a
   knowledge item from a foreign workspace is rejected (`KnowledgeScopeViolationException`) and a
   same-workspace item passes. Acceptance: passes without a DB.
@@ -120,7 +120,7 @@ green; the unit tests run without Docker.
 - [X] T013 [US1] Create `.github/workflows/nightly.yml`. Trigger: `schedule` (cron `0 3 * * *`) +
   `workflow_dispatch`. Job runs `./gradlew test -PincludeSlow=true` (or the project's `slowTest` task
   if present) so `@Tag("slow")` benchmark ITs run. Acceptance: YAML valid.
-- [ ] T014 [US1] Run the whole fast unit layer to confirm the pyramid base is green:
+- [X] T014 [US1] Run the whole fast unit layer to confirm the pyramid base is green:
   `/opt/gradle/bin/gradle :projection:test :casecore:test :governance:test :persona:test --tests '*Test'`
   and confirm the five new `*Test` classes pass. (Integration suites still require a Docker runtime and
   run in CI, not here.)
