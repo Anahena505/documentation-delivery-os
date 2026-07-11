@@ -196,6 +196,10 @@ d2os:
   # verifier/audit jobs themselves land in a later phase (T008+); these keys are wired now so that
   # work has a single place to read config from.
   projection:
+    # Projector's own continuous-consumer sweep cadence (T008, a later-phase key T003 did not
+    # anticipate needing — ReconciliationJob's reconciliation-interval-ms is the direct precedent).
+    # Comfortably under the 30s lag-threshold-seconds target below.
+    consumer-interval-ms: ${D2OS_PROJECTION_CONSUMER_INTERVAL_MS:5000}
     # Incremental-projection-lag alarm threshold (research R4, plan.md's <=30s operational target).
     lag-threshold-seconds: ${D2OS_PROJECTION_LAG_THRESHOLD_SECONDS:30}
     # Traceability query pagination default (research R7) — node budget before a LineageResult
