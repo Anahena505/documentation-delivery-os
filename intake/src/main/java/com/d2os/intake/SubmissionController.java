@@ -1,9 +1,12 @@
 package com.d2os.intake;
 
+import com.d2os.casecore.DecisionRepository;
 import com.d2os.intake.attachment.Attachment;
 import com.d2os.intake.attachment.AttachmentPolicyException;
 import com.d2os.intake.attachment.AttachmentResponse;
 import com.d2os.intake.attachment.AttachmentService;
+import com.d2os.intake.dto.CaseTypeClassificationResponse;
+import com.d2os.intake.dto.ConfirmCaseTypeRequest;
 import com.d2os.intake.dto.ConfirmClassificationRequest;
 import com.d2os.intake.dto.CreateSubmissionRequest;
 import com.d2os.intake.dto.SubmissionResponse;
@@ -23,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 
 /** Intake API (contracts/api.yaml — intake tag). T023 + T025 + attachment upload surface (T041). */
@@ -32,10 +36,16 @@ public class SubmissionController {
 
     private final SubmissionService submissionService;
     private final AttachmentService attachmentService;
+    private final ProblemSubmissionRepository submissionRepository;
+    private final DecisionRepository decisionRepository;
 
-    public SubmissionController(SubmissionService submissionService, AttachmentService attachmentService) {
+    public SubmissionController(SubmissionService submissionService, AttachmentService attachmentService,
+                                ProblemSubmissionRepository submissionRepository,
+                                DecisionRepository decisionRepository) {
         this.submissionService = submissionService;
         this.attachmentService = attachmentService;
+        this.submissionRepository = submissionRepository;
+        this.decisionRepository = decisionRepository;
     }
 
     /** POST /submissions — create + classify (FR-001). */
@@ -51,6 +61,32 @@ public class SubmissionController {
                                                       @Valid @RequestBody ConfirmClassificationRequest request) {
         ProblemSubmission updated = submissionService.confirmClassification(id, request);
         return ResponseEntity.ok(SubmissionResponse.from(updated));
+    }
+
+    /** GET /submissions/{id}/case-type — proposal + confirmation state, incl. UNDETERMINED (T011, US1). */
+    @GetMapping("/{id}/case-type")
+    public ResponseEntity<CaseTypeClassificationResponse> getCaseType(@PathVariable UUID id) {
+        ProblemSubmission submission = submissionRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("submission " + id));
+        return ResponseEntity.ok(CaseTypeClassificationResponse.from(submission, decisionIdFor(id)));
+    }
+
+    /**
+     * POST /submissions/{id}/case-type/confirm — human confirm/override of the DMN's case-type
+     * proposal (T011, US1, FR-003/019). Mandatory before Case creation (contracts `/cases` 412).
+     */
+    @PostMapping("/{id}/case-type/confirm")
+    public ResponseEntity<CaseTypeClassificationResponse> confirmCaseType(
+            @PathVariable UUID id, @Valid @RequestBody ConfirmCaseTypeRequest request) {
+        ProblemSubmission updated = submissionService.confirmCaseType(id, request);
+        return ResponseEntity.ok(CaseTypeClassificationResponse.from(updated, decisionIdFor(id)));
+    }
+
+    private UUID decisionIdFor(UUID submissionId) {
+        return decisionRepository
+                .findFirstByInputsRefAndDecisionTypeOrderByCreatedAtDesc(submissionId.toString(), "D4")
+                .map(d -> d.getId())
+                .orElse(null);
     }
 
     /**
@@ -88,5 +124,21 @@ public class SubmissionController {
                 ? HttpStatus.PAYLOAD_TOO_LARGE          // 413
                 : HttpStatus.UNPROCESSABLE_ENTITY;      // 422
         return ResponseEntity.status(status).body(e.getMessage());
+    }
+
+    /** T011/US1: case type already confirmed → 409 (contracts/api.yaml `/case-type/confirm`). */
+    @ExceptionHandler(AlreadyConfirmedException.class)
+    public ResponseEntity<String> onAlreadyConfirmed(AlreadyConfirmedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
+    }
+
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<String> onNotFound(NoSuchElementException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<String> onBadRequest(IllegalArgumentException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
     }
 }

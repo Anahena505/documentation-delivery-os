@@ -105,6 +105,11 @@ d2os:
       # HEARTBEAT cadence (ms) for Running cases so a long AI call never looks frozen (FR-011, ≤5s).
       # Plain milliseconds so @Scheduled parses it unambiguously.
       heartbeat-interval-ms: ${D2OS_PROGRESS_HEARTBEAT_MS:4000}
+    mutating-guard:
+      # Phase 4 Q2 optimistic single-active-mutating-case guard on the Feature aggregate (research
+      # R3, FR-012/013): a guarded UPDATE admits exactly one active mutating Case per Feature.
+      # Assessment case creation (mutating=false) skips the guard entirely.
+      enabled: ${D2OS_MUTATING_GUARD_ENABLED:true}
   intake:
     attachment:
       # Default-deny upload surface (Principle V, T1-d): only allowlisted types, size-capped.
@@ -116,6 +121,16 @@ d2os:
         application/vnd.openxmlformats-officedocument.presentationml.presentation,
         text/plain, text/markdown, text/csv
       extraction-timeout: ${D2OS_ATTACHMENT_EXTRACTION_TIMEOUT:60s}
+    classification:
+      # Phase 4 case-type classification DMN hit policy (research R5, FR-002/004): UNIQUE forces a
+      # single unambiguous proposed type; no-match rows fall through to UNDETERMINED rather than
+      # first-match-wins guessing.
+      hit-policy: ${D2OS_INTAKE_CASE_TYPE_HIT_POLICY:UNIQUE}
+    conditional-artifacts:
+      # Phase 4 conditional-artifacts DMN hit policy (research R6, FR-014/015): COLLECT accumulates
+      # every matching row (e.g. multiple independent conditions each adding a required artifact)
+      # into the case-type's expected-artifact set instead of picking a single winner.
+      hit-policy: ${D2OS_INTAKE_CONDITIONAL_ARTIFACTS_HIT_POLICY:COLLECT}
   storage:
     endpoint: ${D2OS_STORAGE_ENDPOINT:http://localhost:9000}
     bucket: ${D2OS_STORAGE_BUCKET:d2os-artifacts}

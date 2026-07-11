@@ -9,6 +9,7 @@ import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -47,6 +48,21 @@ public class ProblemSubmission {
     @Column(name = "classification_confirmed_by")
     private String classificationConfirmedBy;
 
+    // Phase 4 (V18, research R5, FR-019, T005/T010/T011). Distinct from the Phase 1-3 `status` /
+    // `classificationCaseType` fields above: this is the real 3-way (INITIATION/ASSESSMENT/ENHANCEMENT)
+    // routing proposal + human confirm, with UNDETERMINED as an explicit possible proposal.
+    @Column(name = "proposed_case_type")
+    private String proposedCaseType;
+
+    @Column(name = "confirmed_case_type")
+    private String confirmedCaseType;
+
+    @Column(name = "classification_status", nullable = false)
+    private String classificationStatus = "PROPOSED";
+
+    @Column(name = "classification_overridden", nullable = false)
+    private boolean classificationOverridden = false;
+
     @Column(nullable = false)
     private String status = Status.received.name();
 
@@ -81,6 +97,41 @@ public class ProblemSubmission {
         this.classificationConfirmedBy = confirmedBy;
         this.classificationNeedsConfirm = false;
         this.status = Status.confirmed.name();
+        // Phase 4 (T012): keep the new classification_status columns in sync so CaseService's
+        // classification-confirmed gate (`classification_status = CONFIRMED`, reading
+        // `confirmed_case_type` as the case-type key) admits submissions confirmed via this legacy
+        // Phase 1-3 endpoint too — one authoritative source for Case-creation eligibility, whichever
+        // confirm endpoint a caller used.
+        this.confirmedCaseType = confirmedCaseType == null ? null : confirmedCaseType.toUpperCase(Locale.ROOT);
+        this.classificationOverridden = this.proposedCaseType != null
+                && !this.proposedCaseType.equalsIgnoreCase(confirmedCaseType);
+        this.classificationStatus = "CONFIRMED";
+    }
+
+    /** Phase 4 (T010): record the case-type-classification DMN's advisory proposal (research R5). */
+    public void applyCaseTypeProposal(String proposedCaseType) {
+        this.proposedCaseType = proposedCaseType;
+        // Re-classification before confirm is allowed to update the proposal; once CONFIRMED the
+        // proposal is frozen (never overwritten — see confirmCaseType's invariant note).
+        if (!"CONFIRMED".equals(this.classificationStatus)) {
+            this.classificationStatus = "PROPOSED";
+        }
+    }
+
+    /**
+     * Phase 4 (T011, US1): human confirm/override of the proposed case type. Confirming with a type
+     * different from the proposal records an override; the original proposal column is never
+     * overwritten (data-model.md invariant). Throws {@link IllegalStateException} if already
+     * CONFIRMED — the caller (SubmissionService) maps that to HTTP 409.
+     */
+    public void confirmCaseType(String caseType) {
+        if ("CONFIRMED".equals(this.classificationStatus)) {
+            throw new IllegalStateException("submission " + id + " case type is already confirmed");
+        }
+        this.classificationOverridden = this.proposedCaseType == null
+                || !this.proposedCaseType.equalsIgnoreCase(caseType);
+        this.confirmedCaseType = caseType.toUpperCase(Locale.ROOT);
+        this.classificationStatus = "CONFIRMED";
     }
 
     public UUID getId() { return id; }
@@ -91,6 +142,10 @@ public class ProblemSubmission {
     public BigDecimal getClassificationConfidence() { return classificationConfidence; }
     public boolean isClassificationNeedsConfirm() { return classificationNeedsConfirm; }
     public String getClassificationConfirmedBy() { return classificationConfirmedBy; }
+    public String getProposedCaseType() { return proposedCaseType; }
+    public String getConfirmedCaseType() { return confirmedCaseType; }
+    public String getClassificationStatus() { return classificationStatus; }
+    public boolean isClassificationOverridden() { return classificationOverridden; }
     public String getStatus() { return status; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
 }

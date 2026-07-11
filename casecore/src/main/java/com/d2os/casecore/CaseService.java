@@ -65,8 +65,13 @@ public class CaseService {
 
     @Transactional
     public CaseInstance openCase(SubmissionLookup.SubmissionInfo submission, UUID featureId) {
+        // Phase 4 (T012, US1, contracts `/cases` 412): a submission's confirmed flag now reflects the
+        // case-type classification's classification_status = CONFIRMED (IntakeSubmissionLookup), which
+        // subsumes the Phase 1-3 confirm-classification flow (ProblemSubmission.confirm keeps both in
+        // sync). Case creation is blocked with 412, not the generic 422, until that gate is satisfied.
         if (!submission.confirmed()) {
-            throw new CaseCreationException("submission " + submission.id() + " is not confirmed");
+            throw new ClassificationNotConfirmedException(
+                    "submission " + submission.id() + " classification is not yet confirmed");
         }
 
         Feature feature = featureRepository.findById(featureId)
@@ -178,10 +183,19 @@ public class CaseService {
      * Pin the case-type ref plus every definition its body's {@code dependsOn} list names
      * (each entry is {@code "type:key"}). This is the AD-4 freeze — every definition the workflow
      * will touch must be resolved and captured here, not just ones sharing the case type's own key.
+     *
+     * <p>Phase 4 (research R2/R3, Principle I): the case-type entry additionally carries the
+     * capability flags read from the {@code CaseTypeDefinition} body — {@code mutating} (whether the
+     * case may write mutating artifacts; drives the Q2 guard exemption, T018) and
+     * {@code artifactKindAllowlist} (the read-only write-path allowlist, T017) — frozen into the
+     * snapshot at the same moment as everything else, so later code reads capability from the pinned
+     * snapshot rather than re-querying the live catalog. Existing case-type seeds (e.g. Initiation)
+     * predate these fields; {@link #extractMutating} / {@link #extractArtifactKindAllowlist} default
+     * to {@code mutating=true} / an empty (unrestricted) allowlist when absent, so nothing breaks.
      */
     private void pinSnapshot(CaseInstance kase, DefinitionView caseType) {
-        List<Map<String, String>> entries = new ArrayList<>();
-        entries.add(refEntry(caseType.toRef()));
+        List<Map<String, Object>> entries = new ArrayList<>();
+        entries.add(caseTypeEntry(caseType));
 
         for (String dep : parseDependsOn(caseType.body())) {
             String[] parts = dep.split(":", 2);
@@ -209,8 +223,54 @@ public class CaseService {
         }
     }
 
-    private Map<String, String> refEntry(DefinitionRef ref) {
+    private Map<String, Object> refEntry(DefinitionRef ref) {
         return Map.of("type", ref.type(), "key", ref.key(), "version", ref.version());
+    }
+
+    /** The case_type snapshot entry, extended with the Phase 4 capability flags (research R2/R3). */
+    private Map<String, Object> caseTypeEntry(DefinitionView caseType) {
+        Map<String, Object> entry = new java.util.LinkedHashMap<>(refEntry(caseType.toRef()));
+        entry.put("mutating", extractMutating(caseType.body()));
+        entry.put("artifactKindAllowlist", extractArtifactKindAllowlist(caseType.body()));
+        return entry;
+    }
+
+    /** {@code mutating} capability flag (research R2/R3); absent ⇒ {@code true} (existing seeds). */
+    private boolean extractMutating(String caseTypeBody) {
+        try {
+            return objectMapper.readTree(caseTypeBody).path("mutating").asBoolean(true);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    /** Read-only write-path artifact-kind allowlist (research R2); absent ⇒ empty/unrestricted. */
+    private List<String> extractArtifactKindAllowlist(String caseTypeBody) {
+        try {
+            JsonNode node = objectMapper.readTree(caseTypeBody).path("artifactKindAllowlist");
+            List<String> allowlist = new ArrayList<>();
+            node.forEach(n -> allowlist.add(n.asText()));
+            return allowlist;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /**
+     * Phase 4 (T018, research R2/R3): true if a Case pinned to {@code snapshot} must hold the Q2
+     * single-active-mutating-case guard slot on its Feature — i.e. the pinned case-type entry's
+     * {@code mutating} flag. Assessment ({@code mutating=false}) is exempt and this returns
+     * {@code false} for it.
+     *
+     * <p><b>Not yet called anywhere.</b> {@link MutatingCaseGuard#acquire}/{@link
+     * MutatingCaseGuard#release} are not wired into {@link #openCase} or {@link #transition} yet —
+     * that wiring is T027 (Phase 6/US4), out of scope for this delivery. This helper exists now so
+     * T027's wiring is a one-line gate: {@code if (requiresMutatingSlot(snapshot)) { guard.acquire(...); }}
+     * — the exemption logic lands with the Assessment case type (this phase) rather than being
+     * invented later, even though the guard call site itself doesn't exist until T027.
+     */
+    public boolean requiresMutatingSlot(CaseDefinitionSnapshot snapshot) {
+        return CaseTypeCapability.from(objectMapper, snapshot).mutating();
     }
 
     private String toJson(Object value) {

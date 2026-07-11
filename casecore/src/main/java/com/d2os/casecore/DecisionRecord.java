@@ -13,6 +13,11 @@ import java.util.UUID;
  * D4 promotion gate on a knowledge capture candidate (Phase 3, US2). {@code inputsRef} points at the
  * decided-upon subject (the candidate id) so the decision is auditable and reproducible. Append-only in
  * spirit (never mutated once recorded).
+ *
+ * <p>{@code caseInstanceId} is nullable as of V19 (Phase 4, T011, US1): the case-type confirm/override
+ * decision (D4) is recorded at {@code POST /submissions/{id}/case-type/confirm} time, which is
+ * necessarily BEFORE a Case exists — Case creation is gated on that very confirmation (T012). Every
+ * other decision-writing call site continues to pass a real case id.
  */
 @Entity
 @Table(name = "decision")
@@ -24,7 +29,7 @@ public class DecisionRecord {
     @Column(name = "workspace_id", nullable = false)
     private UUID workspaceId;
 
-    @Column(name = "case_instance_id", nullable = false)
+    @Column(name = "case_instance_id")
     private UUID caseInstanceId;
 
     @Column(name = "decision_type", nullable = false)

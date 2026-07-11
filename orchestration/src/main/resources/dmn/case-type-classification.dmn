@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             id="d2os-case-type-classification"
+             name="D2OS Case Type Classification"
+             namespace="http://d2os.com/dmn">
+  <!--
+    Phase 4 case-type classification (T008, research R5, FR-002/004). Hit policy UNIQUE: at most one
+    rule may match a given combination of inputs — this makes genuine ambiguity explicit (zero rows
+    match) instead of first-match-wins guessing (contrast with submission-classification.dmn's FIRST
+    hit policy + trailing catch-all default rule).
+
+    UNIQUE hit policy cannot carry a catch-all wildcard rule that also matches specific input
+    combinations without violating uniqueness (a wildcard row and a specific row would both match the
+    same inputs, which UNIQUE forbids at deploy/evaluation time). So there is deliberately NO
+    default/fallback rule
+    here. When none of the rules below match, Flowable's DmnDecisionService returns no result (or the
+    single-result executor throws) rather than picking a "best guess" row; CaseTypeClassificationService
+    (T010) treats that outcome as the proposal UNDETERMINED, exactly the way DmnClassificationService
+    (Phase 1-3) falls back to a safe default whenever the engine returns nothing usable. The ambiguity
+    is then surfaced to the human confirm step (US1) rather than encoded as a DMN rule.
+  -->
+  <decision id="caseTypeClassification" name="Case Type Classification">
+    <decisionTable id="dt-case-type-classification" hitPolicy="UNIQUE">
+      <input id="in-subjectExists" label="Subject Exists">
+        <inputExpression id="ie-subjectExists" typeRef="boolean">
+          <text>subject_exists</text>
+        </inputExpression>
+      </input>
+      <input id="in-hasDeliveredBaseline" label="Has Delivered Baseline">
+        <inputExpression id="ie-hasDeliveredBaseline" typeRef="boolean">
+          <text>has_delivered_baseline</text>
+        </inputExpression>
+      </input>
+      <input id="in-requestIntent" label="Request Intent">
+        <inputExpression id="ie-requestIntent" typeRef="string">
+          <text>request_intent</text>
+        </inputExpression>
+      </input>
+      <output id="out-caseType" label="Case Type" name="caseType" typeRef="string"/>
+
+      <!-- No subject on record at all: this can only be a from-scratch initiation, regardless of the
+           stated intent or any (necessarily false) baseline. -->
+      <rule id="r-initiation">
+        <inputEntry id="ie-r1-subject"><text>false</text></inputEntry>
+        <!-- Wildcard cells use an EMPTY <text> (no FEEL unary test = "any"), matching the convention
+             already established by submission-classification.dmn's default rule in this repo — NOT a
+             literal "-" character, which is only the human-readable table notation, not valid FEEL
+             source in the XML <text> element. -->
+        <inputEntry id="ie-r1-baseline"><text></text></inputEntry>
+        <inputEntry id="ie-r1-intent"><text></text></inputEntry>
+        <outputEntry id="oe-r1-caseType"><text>"INITIATION"</text></outputEntry>
+      </rule>
+
+      <!-- Subject exists, nothing has ever been delivered against it, and the requester wants it
+           evaluated (not changed): a read-only Assessment (findings + recommendation only). -->
+      <rule id="r-assessment">
+        <inputEntry id="ie-r2-subject"><text>true</text></inputEntry>
+        <inputEntry id="ie-r2-baseline"><text>false</text></inputEntry>
+        <inputEntry id="ie-r2-intent"><text>"evaluate"</text></inputEntry>
+        <outputEntry id="oe-r2-caseType"><text>"ASSESSMENT"</text></outputEntry>
+      </rule>
+
+      <!-- Subject exists, a baseline has already been delivered, and the requester wants it changed:
+           an Enhancement anchored to that delivered baseline. -->
+      <rule id="r-enhancement">
+        <inputEntry id="ie-r3-subject"><text>true</text></inputEntry>
+        <inputEntry id="ie-r3-baseline"><text>true</text></inputEntry>
+        <inputEntry id="ie-r3-intent"><text>"change"</text></inputEntry>
+        <outputEntry id="oe-r3-caseType"><text>"ENHANCEMENT"</text></outputEntry>
+      </rule>
+
+      <!-- Deliberately no further rules. Every other combination (e.g. subject_exists=true,
+           has_delivered_baseline=false, request_intent="change" — asking to change something that was
+           never delivered) matches nothing here and is UNDETERMINED, per the header note above. -->
+    </decisionTable>
+  </decision>
+</definitions>

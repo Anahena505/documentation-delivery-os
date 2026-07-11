@@ -21,6 +21,11 @@ public class CaseExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
     }
 
+    @ExceptionHandler(ClassificationNotConfirmedException.class)
+    public ProblemDetail onClassificationNotConfirmed(ClassificationNotConfirmedException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.PRECONDITION_FAILED, e.getMessage());
+    }
+
     @ExceptionHandler(IllegalCaseTransitionException.class)
     public ProblemDetail onIllegalTransition(IllegalCaseTransitionException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
