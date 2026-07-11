@@ -11,6 +11,17 @@ spring:
     url: ${D2OS_DB_URL:jdbc:postgresql://localhost:5432/d2os}
     username: ${D2OS_DB_APP_USER:d2os_app}
     password: ${D2OS_DB_APP_PASSWORD}
+    # Phase 7 (T002, research R2): the projector's WRITE-path datasource, bound to the
+    # d2os_projector role (V28 migration) — the sole writer of the graph_node/graph_edge/
+    # projection_* tables (Principle III). Same database as the datasource block above, deliberately
+    # a DIFFERENT least-privilege role, same env-var-default convention as spring.datasource.* (no
+    # default for the password — must fail loudly, never silently connect unauthenticated). Bound
+    # by com.d2os.projection.config.ProjectorDataSourceConfig, NOT @Primary, so it never displaces
+    # the app's normal datasource bean.
+    projector:
+      url: ${D2OS_DB_URL:jdbc:postgresql://localhost:5432/d2os}
+      username: ${D2OS_DB_PROJECTOR_USER:d2os_projector}
+      password: ${D2OS_DB_PROJECTOR_PASSWORD}
   # Flyway runs as the schema-owning role — separate credentials, separate connection.
   flyway:
     enabled: true
@@ -24,6 +35,9 @@ spring:
     # never hardcoded in the migration SQL.
     placeholders:
       approlepassword: ${D2OS_DB_APP_PASSWORD}
+      # V28__graph_projection.sql provisions the d2os_projector login role (same bootstrap
+      # convention as approlepassword above).
+      projectorrolepassword: ${D2OS_DB_PROJECTOR_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -178,6 +192,30 @@ d2os:
       # a placeholder) — the benchmark's own job is proving pin resolution stays <= 2s at this
       # scale, not tuning the scale itself.
       seed-versions: ${D2OS_CATALOG_BENCHMARK_SEED_VERSIONS:500}
+  # Graph Projection + Analytics (Phase 7, tasks.md T003, research R4-R8). The projector/rebuild/
+  # verifier/audit jobs themselves land in a later phase (T008+); these keys are wired now so that
+  # work has a single place to read config from.
+  projection:
+    # Incremental-projection-lag alarm threshold (research R4, plan.md's <=30s operational target).
+    lag-threshold-seconds: ${D2OS_PROJECTION_LAG_THRESHOLD_SECONDS:30}
+    # Traceability query pagination default (research R7) — node budget before a LineageResult
+    # truncates and returns a page token.
+    node-budget: ${D2OS_PROJECTION_NODE_BUDGET:500}
+    rebuild:
+      # Scheduled drift-detection equivalence check against the LIVE generation (research R5) — a
+      # weekly cadence (Sunday 03:00) since it is a backstop, not the primary correctness path (that
+      # is the verify-then-flip rebuild itself, T009). Cron format (six-field, Spring's @Scheduled).
+      schedule: ${D2OS_PROJECTION_REBUILD_SCHEDULE:0 0 3 * * SUN}
+    cycle-sweep:
+      # Scheduled full-graph cycle sweep cadence (research R8) — the completeness backstop behind
+      # the incremental on-insert check; daily, since a cycle sitting undetected for a whole week
+      # (the rebuild-drift cadence above) would be too slow for an alert meant to catch build-time
+      # dependency mistakes. Cron format (six-field, Spring's @Scheduled).
+      cadence: ${D2OS_PROJECTION_CYCLE_SWEEP_CADENCE:0 0 4 * * *}
+    # Open projection_gap rows (per workspace) before PayloadSufficiencyAuditor raises an alert
+    # (research R6, FR-011) — past this count, isolated thin events become a systemic emitter-side
+    # problem worth paging on rather than individually triaging.
+    gap-alert-threshold: ${D2OS_PROJECTION_GAP_ALERT_THRESHOLD:10}
 
 server:
   port: 8080

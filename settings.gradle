@@ -22,6 +22,10 @@ include 'governance'
 // htmx) over the catalog/governance/casecore services; no catalog semantics live here (plan.md
 // Structure Decision, tasks.md T001).
 include 'studio'
+// Graph Projection + Analytics (Phase 7, the 14th module) — derived, rebuildable graph read
+// model (graph_node/graph_edge) projected from the outbox + polymorphic edge tables; sole writer
+// of the graph tables via the d2os_projector DB role (plan.md Structure Decision, tasks.md T001).
+include 'projection'
 
 // Shared test support (Testcontainers fixtures, ArchUnit rules)
 include 'test-support'
