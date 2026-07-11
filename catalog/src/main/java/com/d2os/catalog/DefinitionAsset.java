@@ -62,6 +62,14 @@ public class DefinitionAsset {
     @Column(name = "created_by", nullable = false)
     private String createdBy;
 
+    /** V25 fork provenance (T021, FR-012) — the source definition this row was forked from, if any. */
+    @Column(name = "derived_from_id")
+    private UUID derivedFromId;
+
+    /** V25 copy-on-subscribe provenance (T025, FR-015) — the Global source this row was copied from, if any. */
+    @Column(name = "copied_from_id")
+    private UUID copiedFromId;
+
     protected DefinitionAsset() {}
 
     public DefinitionAsset(UUID id, UUID workspaceId, String key, String version, String type,
@@ -165,6 +173,30 @@ public class DefinitionAsset {
         this.publishedAt = OffsetDateTime.now();
     }
 
+    /**
+     * Deprecate a Published definition (Phase 6 US3, T023, research R5, FR-010). Only legal from
+     * Published — a Draft/InReview row has never been runtime-resolvable in the first place, and a
+     * definition can only ever be deprecated once (re-deprecating an already-Deprecated row is
+     * refused, not a silent no-op, so a caller can't paper over a stale UI state).
+     */
+    public void markDeprecated() {
+        if (!Status.Published.name().equals(status)) {
+            throw new IllegalStateException(
+                    "Only Published definitions can be deprecated; " + key + " is " + status);
+        }
+        this.status = Status.Deprecated.name();
+    }
+
+    /** Fork provenance (V25 {@code derived_from_id}, T021, FR-012). Set once, at construction time. */
+    public void recordForkProvenance(UUID sourceId) {
+        this.derivedFromId = sourceId;
+    }
+
+    /** Copy-on-subscribe provenance (V25 {@code copied_from_id}, T025, FR-015). Set once, at construction time. */
+    public void recordCopyProvenance(UUID sourceId) {
+        this.copiedFromId = sourceId;
+    }
+
     public UUID getId() { return id; }
     public UUID getWorkspaceId() { return workspaceId; }
     public String getKey() { return key; }
@@ -177,4 +209,6 @@ public class DefinitionAsset {
     public OffsetDateTime getPublishedAt() { return publishedAt; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public String getCreatedBy() { return createdBy; }
+    public UUID getDerivedFromId() { return derivedFromId; }
+    public UUID getCopiedFromId() { return copiedFromId; }
 }

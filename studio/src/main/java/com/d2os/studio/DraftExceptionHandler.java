@@ -1,5 +1,6 @@
 package com.d2os.studio;
 
+import com.d2os.catalog.SubscriptionConflictException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -31,6 +32,12 @@ public class DraftExceptionHandler {
      */
     @ExceptionHandler(PublishConflictException.class)
     public ProblemDetail onPublishConflict(PublishConflictException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+    }
+
+    /** {@code SubscriptionConflictException} (T025, US4): already-subscribed — 409. */
+    @ExceptionHandler(SubscriptionConflictException.class)
+    public ProblemDetail onSubscriptionConflict(SubscriptionConflictException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
     }
 

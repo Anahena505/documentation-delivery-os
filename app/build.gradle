@@ -33,10 +33,12 @@ dependencies {
 }
 
 // The default test task excludes the load posture suite (T039) — it drives 50+ concurrent cases and
-// is slow. Run it explicitly with `gradle :app:loadTest`.
+// is slow. Run it explicitly with `gradle :app:loadTest`. Also excludes the catalog-scale resolution
+// benchmark (Phase 6 US5, T030, tag "slow") — 1 000 resolutions against a 500-version seeded catalog;
+// run nightly via `gradle :app:slowTest`, not on every `:app:test`.
 tasks.named('test') {
     useJUnitPlatform {
-        excludeTags 'load'
+        excludeTags 'load', 'slow'
     }
 }
 
@@ -49,5 +51,16 @@ tasks.register('loadTest', Test) {
         includeTags 'load'
     }
     // Never cache a load result — it is timing-sensitive and environment-dependent.
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('slowTest', Test) {
+    description = 'Runs slow/nightly suites only (JUnit tag "slow"), e.g. ResolutionBenchmarkIT (T030). Excluded from `test`.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'slow'
+    }
     outputs.upToDateWhen { false }
 }
