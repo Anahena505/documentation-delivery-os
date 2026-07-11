@@ -4,6 +4,9 @@ import com.d2os.casecore.AuditEntryRecord;
 import com.d2os.casecore.AuditEntryRepository;
 import com.d2os.tenancy.WorkspaceContext;
 import com.d2os.tenancy.security.WorkspaceRlsBinder;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -37,19 +40,36 @@ public class AuditChainVerifier {
     private final AuditChainSegmentRepository segmentRepository;
     private final WorkspaceRlsBinder workspaceRlsBinder;
     private final JdbcTemplate jdbcTemplate;
+    private final MeterRegistry meterRegistry;
 
     public AuditChainVerifier(AuditEntryRepository auditEntryRepository, AuditChainSegmentRepository segmentRepository,
-                              WorkspaceRlsBinder workspaceRlsBinder, JdbcTemplate jdbcTemplate) {
+                              WorkspaceRlsBinder workspaceRlsBinder, JdbcTemplate jdbcTemplate,
+                              MeterRegistry meterRegistry) {
         this.auditEntryRepository = auditEntryRepository;
         this.segmentRepository = segmentRepository;
         this.workspaceRlsBinder = workspaceRlsBinder;
         this.jdbcTemplate = jdbcTemplate;
+        this.meterRegistry = meterRegistry;
     }
 
+    // US2 (T019): per-job USE metrics inline against MeterRegistry (casecore cannot depend on
+    // observability — cycle). Meter names match observability's JobMetrics exactly.
+    private static final String JOB = "audit-chain-verifier";
+
     @Scheduled(cron = "${d2os.governance.audit.verify-cron:0 30 * * * *}")
+    @SchedulerLock(name = "audit-chain-verifier", lockAtMostFor = "PT5M")
     public void verifyAllWorkspaces() {
-        for (UUID workspaceId : jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class)) {
-            verifyWorkspace(workspaceId);
+        meterRegistry.counter("d2os.job.executions", "job", JOB).increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            for (UUID workspaceId : jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class)) {
+                verifyWorkspace(workspaceId);
+            }
+        } catch (RuntimeException e) {
+            meterRegistry.counter("d2os.job.failures", "job", JOB).increment();
+            throw e;
+        } finally {
+            sample.stop(meterRegistry.timer("d2os.job.duration", "job", JOB));
         }
     }
 

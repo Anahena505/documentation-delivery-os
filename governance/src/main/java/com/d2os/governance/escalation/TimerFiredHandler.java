@@ -4,6 +4,7 @@ import com.d2os.governance.GateEventPublisher;
 import com.d2os.governance.GateInstance;
 import com.d2os.governance.GateInstanceRepository;
 import com.d2os.governance.GateStatus;
+import com.d2os.governance.metrics.GovernanceMetrics;
 import com.d2os.governance.notification.NotificationService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,17 +30,20 @@ public class TimerFiredHandler {
     private final EscalationActivationRepository activationRepository;
     private final NotificationService notificationService;
     private final GateEventPublisher gateEventPublisher;
+    private final GovernanceMetrics governanceMetrics;
 
     public TimerFiredHandler(GateInstanceRepository gateInstanceRepository,
                              EscalationPolicyResolver escalationPolicyResolver,
                              EscalationActivationRepository activationRepository,
                              NotificationService notificationService,
-                             GateEventPublisher gateEventPublisher) {
+                             GateEventPublisher gateEventPublisher,
+                             GovernanceMetrics governanceMetrics) {
         this.gateInstanceRepository = gateInstanceRepository;
         this.escalationPolicyResolver = escalationPolicyResolver;
         this.activationRepository = activationRepository;
         this.notificationService = notificationService;
         this.gateEventPublisher = gateEventPublisher;
+        this.governanceMetrics = governanceMetrics;
     }
 
     /**
@@ -78,6 +82,9 @@ public class TimerFiredHandler {
                 "Gate " + gate.getId() + " has been open past its advisory SLA (step " + stepIndex + ", role " + resolvedRole + ")");
 
         gateEventPublisher.publishEscalationFired(gate, policyKey, policyVersion, stepIndex);
+
+        // T020: an escalation firing on an OPEN gate is exactly an advisory-SLA breach — count it.
+        governanceMetrics.recordSlaBreach();
 
         return activation.getId();
     }

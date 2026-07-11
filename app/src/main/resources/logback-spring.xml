@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  008 T017 (US2): structured JSON logging with correlation IDs. Logs are emitted as one JSON object
+  per line via logstash-logback-encoder so a log pipeline (Loki/ELK/etc.) can index them, with the
+  MDC keys workspace_id, case_id, and the tracing trace_id/span_id surfaced as first-class fields for
+  cross-cutting correlation. workspace_id/case_id are populated by the request/case scope where set;
+  trace_id/span_id come from Micrometer Tracing's MDC (traceId/spanId), empty when tracing is a no-op.
+
+  Spring Boot's defaults.xml is included so log-level conversion rules and the standard property
+  defaults still apply. A plain human-readable console appender is used under the "local" and "test"
+  profiles so developer/CI output stays readable; JSON is the default everywhere else.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- JSON appender to stdout (the console) — the default production posture. -->
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp/>
+                <version/>
+                <logLevel/>
+                <loggerName/>
+                <threadName/>
+                <message/>
+                <!-- includes every MDC entry, e.g. workspace_id and case_id when set -->
+                <mdc/>
+                <!-- surface the tracing correlation ids under stable snake_case field names -->
+                <pattern>
+                    <pattern>
+                        {
+                        "workspace_id": "%mdc{workspace_id:-}",
+                        "case_id": "%mdc{case_id:-}",
+                        "trace_id": "%mdc{traceId:-}",
+                        "span_id": "%mdc{spanId:-}"
+                        }
+                    </pattern>
+                </pattern>
+                <stackTrace/>
+            </providers>
+        </encoder>
+    </appender>
+
+    <!-- Human-readable console for local dev + tests; includes the same correlation ids in the pattern. -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [ws=%X{workspace_id:-} case=%X{case_id:-} trace=%X{traceId:-}] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <springProfile name="local,test">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!local &amp; !test">
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+</configuration>

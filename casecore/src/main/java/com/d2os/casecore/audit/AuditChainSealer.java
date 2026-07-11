@@ -4,6 +4,9 @@ import com.d2os.casecore.AuditEntryRecord;
 import com.d2os.casecore.AuditEntryRepository;
 import com.d2os.tenancy.WorkspaceContext;
 import com.d2os.tenancy.security.WorkspaceRlsBinder;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -27,22 +30,40 @@ public class AuditChainSealer {
     private final AuditEntryRepository auditEntryRepository;
     private final AuditChainSegmentRepository segmentRepository;
     private final WorkspaceRlsBinder workspaceRlsBinder;
+    private final MeterRegistry meterRegistry;
 
     public AuditChainSealer(JdbcTemplate jdbcTemplate, AuditEntryRepository auditEntryRepository,
-                            AuditChainSegmentRepository segmentRepository, WorkspaceRlsBinder workspaceRlsBinder) {
+                            AuditChainSegmentRepository segmentRepository, WorkspaceRlsBinder workspaceRlsBinder,
+                            MeterRegistry meterRegistry) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditEntryRepository = auditEntryRepository;
         this.segmentRepository = segmentRepository;
         this.workspaceRlsBinder = workspaceRlsBinder;
+        this.meterRegistry = meterRegistry;
     }
 
+    // US2 (T019): per-job USE metrics recorded inline against MeterRegistry rather than via
+    // observability's JobMetrics — casecore cannot depend on observability (that module depends on
+    // casecore; the reverse edge would be a Gradle cycle). Meter names match JobMetrics exactly.
+    private static final String JOB = "audit-chain-sealer";
+
     @Scheduled(cron = "${d2os.governance.audit.seal-cron:0 0 * * * *}")
+    @SchedulerLock(name = "audit-chain-sealer", lockAtMostFor = "PT5M")
     public void sealAllWorkspaces() {
-        // Reuses the SECURITY DEFINER enumeration function the projector's cross-tenant sweep already
-        // established (V29) — RLS gives no ordinary-SELECT tenant-enumeration escape hatch, and this
-        // job, like the projector, must visit every workspace before any single one is bound.
-        for (UUID workspaceId : jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class)) {
-            sealWorkspace(workspaceId);
+        meterRegistry.counter("d2os.job.executions", "job", JOB).increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            // Reuses the SECURITY DEFINER enumeration function the projector's cross-tenant sweep already
+            // established (V29) — RLS gives no ordinary-SELECT tenant-enumeration escape hatch, and this
+            // job, like the projector, must visit every workspace before any single one is bound.
+            for (UUID workspaceId : jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class)) {
+                sealWorkspace(workspaceId);
+            }
+        } catch (RuntimeException e) {
+            meterRegistry.counter("d2os.job.failures", "job", JOB).increment();
+            throw e;
+        } finally {
+            sample.stop(meterRegistry.timer("d2os.job.duration", "job", JOB));
         }
     }
 

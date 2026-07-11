@@ -3,11 +3,13 @@ package com.d2os.orchestration;
 import com.d2os.casecore.CaseInstance;
 import com.d2os.casecore.CaseInstanceRepository;
 import com.d2os.casecore.CaseStatus;
+import com.d2os.observability.JobMetrics;
 import com.d2os.tenancy.WorkspaceContext;
 import com.d2os.tenancy.security.WorkspaceRlsBinder;
 import org.flowable.engine.HistoryService;
 import org.flowable.engine.RuntimeService;
 import org.flowable.engine.history.HistoricProcessInstance;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -51,31 +53,37 @@ public class CaseDeliveredKnowledgeTrigger {
     private final RuntimeService runtimeService;
     private final CaseInstanceRepository caseRepository;
     private final WorkspaceRlsBinder workspaceRlsBinder;
+    private final JobMetrics jobMetrics;
 
     public CaseDeliveredKnowledgeTrigger(HistoryService historyService,
                                          RuntimeService runtimeService,
                                          CaseInstanceRepository caseRepository,
-                                         WorkspaceRlsBinder workspaceRlsBinder) {
+                                         WorkspaceRlsBinder workspaceRlsBinder,
+                                         JobMetrics jobMetrics) {
         this.historyService = historyService;
         this.runtimeService = runtimeService;
         this.caseRepository = caseRepository;
         this.workspaceRlsBinder = workspaceRlsBinder;
+        this.jobMetrics = jobMetrics;
     }
 
     @Scheduled(fixedDelayString = "${d2os.knowledge.capture-trigger-interval-ms:30000}",
                initialDelayString = "${d2os.knowledge.capture-trigger-interval-ms:30000}")
+    @SchedulerLock(name = "delivered-knowledge-trigger", lockAtMostFor = "PT2M")
     public void sweep() {
-        List<HistoricProcessInstance> finished = historyService.createHistoricProcessInstanceQuery()
-                .processDefinitionKey(INITIATION_PROCESS_KEY)
-                .finished()
-                .list();
-        for (HistoricProcessInstance pi : finished) {
-            try {
-                maybeStartCapture(pi.getBusinessKey());
-            } catch (Exception e) {
-                log.warn("knowledge-capture trigger failed for case {}: {}", pi.getBusinessKey(), e.toString());
+        jobMetrics.time("delivered-knowledge-trigger", () -> {
+            List<HistoricProcessInstance> finished = historyService.createHistoricProcessInstanceQuery()
+                    .processDefinitionKey(INITIATION_PROCESS_KEY)
+                    .finished()
+                    .list();
+            for (HistoricProcessInstance pi : finished) {
+                try {
+                    maybeStartCapture(pi.getBusinessKey());
+                } catch (Exception e) {
+                    log.warn("knowledge-capture trigger failed for case {}: {}", pi.getBusinessKey(), e.toString());
+                }
             }
-        }
+        });
     }
 
     /**

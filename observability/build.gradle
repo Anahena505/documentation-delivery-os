@@ -3,4 +3,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // US2 (T015): Prometheus registry so JobMetrics/ProjectionMetrics meters are scraped at
+    // /actuator/prometheus. BOM-managed (Spring Boot) — no version.
+    implementation 'io.micrometer:micrometer-registry-prometheus'
 }

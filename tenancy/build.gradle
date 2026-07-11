@@ -9,4 +9,15 @@ dependencies {
     implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
+    // US3 (T023): @SchedulerLock on RetentionVerificationJob's scheduled sweep. The annotation lives
+    // in shedlock-spring, needed on this module's own compile classpath; the LockProvider bean is
+    // wired once in app (ShedLockConfig).
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:5.16.0'
+
+    // US2 (T019): RetentionVerificationJob records per-job USE metrics against a MeterRegistry
+    // injected DIRECTLY (not via observability's JobMetrics) — tenancy CANNOT depend on
+    // observability (observability -> casecore -> tenancy, so tenancy -> observability is a Gradle
+    // cycle). micrometer-core supplies io.micrometer.core.instrument.MeterRegistry. BOM-managed.
+    implementation 'io.micrometer:micrometer-core'
 }

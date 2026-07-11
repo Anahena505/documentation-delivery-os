@@ -8,12 +8,14 @@ import com.d2os.casecore.ReconciliationRun;
 import com.d2os.casecore.ReconciliationRunRepository;
 import com.d2os.casecore.progress.ProgressEmitter;
 import com.d2os.casecore.progress.ProgressEvent;
+import com.d2os.observability.JobMetrics;
 import com.d2os.tenancy.WorkspaceContext;
 import com.d2os.tenancy.security.WorkspaceRlsBinder;
 import org.flowable.engine.RuntimeService;
 import org.flowable.engine.runtime.ProcessInstance;
 import org.flowable.job.api.Job;
 import org.flowable.engine.ManagementService;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -50,6 +52,7 @@ public class ReconciliationJob {
     private final ReconciliationRunRepository reconciliationRepository;
     private final ProgressEmitter progressEmitter;
     private final WorkspaceRlsBinder workspaceRlsBinder;
+    private final JobMetrics jobMetrics;
 
     public ReconciliationJob(ManagementService managementService,
                              RuntimeService runtimeService,
@@ -57,7 +60,8 @@ public class ReconciliationJob {
                              CaseService caseService,
                              ReconciliationRunRepository reconciliationRepository,
                              ProgressEmitter progressEmitter,
-                             WorkspaceRlsBinder workspaceRlsBinder) {
+                             WorkspaceRlsBinder workspaceRlsBinder,
+                             JobMetrics jobMetrics) {
         this.managementService = managementService;
         this.runtimeService = runtimeService;
         this.caseRepository = caseRepository;
@@ -65,21 +69,25 @@ public class ReconciliationJob {
         this.reconciliationRepository = reconciliationRepository;
         this.progressEmitter = progressEmitter;
         this.workspaceRlsBinder = workspaceRlsBinder;
+        this.jobMetrics = jobMetrics;
     }
 
     private static final int REPAIR_RETRIES = 5;
 
     @Scheduled(fixedDelayString = "${d2os.orchestration.reconciliation-interval-ms:60000}",
                initialDelayString = "${d2os.orchestration.reconciliation-interval-ms:60000}")
+    @SchedulerLock(name = "reconciliation", lockAtMostFor = "PT2M")
     public void sweep() {
-        List<Job> deadLetterJobs = managementService.createDeadLetterJobQuery().list();
-        for (Job job : deadLetterJobs) {
-            try {
-                reconcileDeadLetter(job.getId(), job.getProcessInstanceId(), job.getExceptionMessage());
-            } catch (Exception e) {
-                log.warn("reconciliation failed for process {}: {}", job.getProcessInstanceId(), e.toString());
+        jobMetrics.time("reconciliation", () -> {
+            List<Job> deadLetterJobs = managementService.createDeadLetterJobQuery().list();
+            for (Job job : deadLetterJobs) {
+                try {
+                    reconcileDeadLetter(job.getId(), job.getProcessInstanceId(), job.getExceptionMessage());
+                } catch (Exception e) {
+                    log.warn("reconciliation failed for process {}: {}", job.getProcessInstanceId(), e.toString());
+                }
             }
-        }
+        });
     }
 
     /**

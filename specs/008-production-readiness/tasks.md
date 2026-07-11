@@ -139,26 +139,26 @@ raises the lag gauge and fires the shipped alert.
 
 ### Implementation
 
-- [ ] T015 [P] [US2] In `app/build.gradle` and `observability/build.gradle`, add
+- [X] T015 [P] [US2] In `app/build.gradle` and `observability/build.gradle`, add
   `implementation 'io.micrometer:micrometer-registry-prometheus'` (BOM-managed, no version).
   Acceptance: `/opt/gradle/bin/gradle :app:dependencies` lists micrometer-registry-prometheus.
-- [ ] T016 [P] [US2] In `app/build.gradle`, add
+- [X] T016 [P] [US2] In `app/build.gradle`, add
   `implementation 'io.micrometer:micrometer-tracing-bridge-otel'` and
   `implementation 'io.opentelemetry:opentelemetry-exporter-otlp'` (BOM-managed). In
   `application.yml` add `management.tracing.sampling.probability: 1.0` and an OTLP endpoint property
   `management.otlp.tracing.endpoint: ${D2OS_OTLP_ENDPOINT:}` (empty default = no-op). Acceptance:
   compiles; app still boots with the env var unset.
-- [ ] T017 [P] [US2] Add JSON logging: add `implementation 'net.logstash.logback:logstash-logback-encoder:8.0'`
+- [X] T017 [P] [US2] Add JSON logging: add `implementation 'net.logstash.logback:logstash-logback-encoder:8.0'`
   to `app/build.gradle`, then create `app/src/main/resources/logback-spring.xml` using
   `LogstashEncoder` and an MDC pattern including `workspace_id`, `case_id`, `trace_id`. Acceptance:
   running `:app:bootRun` (or a `@SpringBootTest`) emits JSON lines.
-- [ ] T018 [US2] Create
+- [X] T018 [US2] Create
   `observability/src/main/java/com/d2os/observability/JobMetrics.java` — a small Spring `@Component`
   holding a `MeterRegistry` that exposes helper methods to record per-job execution/duration/failure
   (`d2os.job.executions{job}`, `d2os.job.duration{job}`, `d2os.job.failures{job}`). Follow the
   constructor-injection style used elsewhere in the module (see `KpiEmitter.java`). Acceptance:
   compiles; unit-instantiable with a `SimpleMeterRegistry`.
-- [ ] T019 [US2] Wire `JobMetrics` into each of the 9 `@Scheduled` methods to time the run and count
+- [X] T019 [US2] Wire `JobMetrics` into each of the 9 `@Scheduled` methods to time the run and count
   failures. Files: `casecore/.../progress/ProgressHeartbeat.java`,
   `casecore/.../audit/AuditChainSealer.java`, `casecore/.../audit/AuditChainVerifier.java`,
   `orchestration/.../CaseDeliveredKnowledgeTrigger.java`, `orchestration/.../ReconciliationJob.java`,
@@ -167,7 +167,7 @@ raises the lag gauge and fires the shipped alert.
   a dependency in each module's `build.gradle` only if not already present (check first; avoid a
   dependency cycle — if a cycle would result, inject a `MeterRegistry` directly instead of `JobMetrics`).
   Acceptance: each module compiles; a meter appears after one scheduled run.
-- [ ] T020 [P] [US2] Register domain-threshold gauges (Micrometer `Gauge`) for
+- [X] T020 [P] [US2] Register domain-threshold gauges (Micrometer `Gauge`) for
   `d2os.projection.lag.seconds`, `d2os.projection.gap.open`, `d2os.gate.sla.breached`,
   `d2os.rebuild.equivalence.divergent`. Put the projection ones in a new
   `projection/src/main/java/com/d2os/projection/ProjectionMetrics.java` reading the same values the
@@ -191,34 +191,34 @@ raises the lag gauge and fires the shipped alert.
 
 ### Implementation
 
-- [ ] T023 [US3] In `app/build.gradle` add
+- [X] T023 [US3] In `app/build.gradle` add
   `implementation 'net.javacrumbs.shedlock:shedlock-spring:5.16.0'` and
   `implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:5.16.0'`. Acceptance:
   compiles.
-- [ ] T024 [US3] Create the ShedLock table migration as the next unused Flyway version (**V30**) at
+- [X] T024 [US3] Create the ShedLock table migration as the next unused Flyway version (**V30**) at
   `tenancy/src/main/resources/db/migration/V30__shedlock.sql` with columns `name text PRIMARY KEY`,
   `lock_until timestamptz NOT NULL`, `locked_at timestamptz NOT NULL`, `locked_by text NOT NULL`
   (per data-model.md §1). Grant the app role read/write. Acceptance: migration file present, SQL valid.
-- [ ] T025 [US3] Create `app/src/main/java/com/d2os/app/ShedLockConfig.java` annotated
+- [X] T025 [US3] Create `app/src/main/java/com/d2os/app/ShedLockConfig.java` annotated
   `@Configuration @EnableSchedulerLock(defaultLockAtMostFor = "PT10M")` with a `LockProvider` bean
   built from a `JdbcTemplateLockProvider` over the app `DataSource`. Acceptance: app context loads.
-- [ ] T026 [P] [US3] Add `@SchedulerLock(name = "projector-sweep", lockAtMostFor = "PT2M")` to the
+- [X] T026 [P] [US3] Add `@SchedulerLock(name = "projector-sweep", lockAtMostFor = "PT2M")` to the
   `@Scheduled` method in `projection/.../Projector.java`. Acceptance: compiles.
-- [ ] T027 [P] [US3] Add `@SchedulerLock(name = "graph-rebuild", lockAtMostFor = "PT15M")` to
+- [X] T027 [P] [US3] Add `@SchedulerLock(name = "graph-rebuild", lockAtMostFor = "PT15M")` to
   `projection/.../RebuildJob.java`'s scheduled method. Acceptance: compiles.
-- [ ] T028 [P] [US3] Add `@SchedulerLock(name = "cycle-sweep", lockAtMostFor = "PT10M")` to
+- [X] T028 [P] [US3] Add `@SchedulerLock(name = "cycle-sweep", lockAtMostFor = "PT10M")` to
   `projection/.../cycle/CycleDetector.java`'s scheduled sweep method. Acceptance: compiles.
-- [ ] T029 [P] [US3] Add `@SchedulerLock(name = "reconciliation", lockAtMostFor = "PT2M")` to
+- [X] T029 [P] [US3] Add `@SchedulerLock(name = "reconciliation", lockAtMostFor = "PT2M")` to
   `orchestration/.../ReconciliationJob.java`. Acceptance: compiles.
-- [ ] T030 [P] [US3] Add `@SchedulerLock(name = "delivered-knowledge-trigger", lockAtMostFor = "PT2M")`
+- [X] T030 [P] [US3] Add `@SchedulerLock(name = "delivered-knowledge-trigger", lockAtMostFor = "PT2M")`
   to `orchestration/.../CaseDeliveredKnowledgeTrigger.java`. Acceptance: compiles.
-- [ ] T031 [P] [US3] Add `@SchedulerLock(name = "audit-chain-sealer", lockAtMostFor = "PT5M")` to
+- [X] T031 [P] [US3] Add `@SchedulerLock(name = "audit-chain-sealer", lockAtMostFor = "PT5M")` to
   `casecore/.../audit/AuditChainSealer.java`. Acceptance: compiles.
-- [ ] T032 [P] [US3] Add `@SchedulerLock(name = "audit-chain-verifier", lockAtMostFor = "PT5M")` to
+- [X] T032 [P] [US3] Add `@SchedulerLock(name = "audit-chain-verifier", lockAtMostFor = "PT5M")` to
   `casecore/.../audit/AuditChainVerifier.java`. Acceptance: compiles.
-- [ ] T033 [P] [US3] Add `@SchedulerLock(name = "retention-verification", lockAtMostFor = "PT30M")` to
+- [X] T033 [P] [US3] Add `@SchedulerLock(name = "retention-verification", lockAtMostFor = "PT30M")` to
   `tenancy/.../RetentionVerificationJob.java`. Acceptance: compiles.
-- [ ] T034 [US3] Give `ProgressHeartbeat` a **per-case** lock so different cases still beat
+- [X] T034 [US3] Give `ProgressHeartbeat` a **per-case** lock so different cases still beat
   concurrently: in `casecore/.../progress/ProgressHeartbeat.java` use
   `@SchedulerLock(name = "progress-heartbeat")` if the beat is a single global sweep, OR if it already
   iterates cases, leave it unlocked and add a code comment explaining it is naturally partitioned (do

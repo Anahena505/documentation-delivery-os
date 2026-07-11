@@ -1,11 +1,13 @@
 package com.d2os.projection.cycle;
 
 import com.d2os.governance.notification.NotificationService;
+import com.d2os.observability.JobMetrics;
 import com.d2os.projection.GraphEdge;
 import com.d2os.tenancy.WorkspaceContext;
 import com.d2os.tenancy.security.WorkspaceRlsBinder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -86,17 +88,20 @@ public class CycleDetector {
     private final PlatformTransactionManager transactionManager;
     private final NotificationService notificationService;
     private final String catalogOwnerRole;
+    private final JobMetrics jobMetrics;
 
     public CycleDetector(JdbcTemplate jdbcTemplate,
                          WorkspaceRlsBinder workspaceRlsBinder,
                          PlatformTransactionManager transactionManager,
                          NotificationService notificationService,
-                         @Value("${d2os.studio.roles.catalog-owner:catalog-owner}") String catalogOwnerRole) {
+                         @Value("${d2os.studio.roles.catalog-owner:catalog-owner}") String catalogOwnerRole,
+                         JobMetrics jobMetrics) {
         this.jdbcTemplate = jdbcTemplate;
         this.workspaceRlsBinder = workspaceRlsBinder;
         this.transactionManager = transactionManager;
         this.notificationService = notificationService;
         this.catalogOwnerRole = catalogOwnerRole;
+        this.jobMetrics = jobMetrics;
     }
 
     // ==== (a) incremental — called by Projector right after upserting a sweep's new edges ==========
@@ -159,15 +164,18 @@ public class CycleDetector {
     // ==== (b) scheduled full-graph sweep — Kahn-style peeling, per workspace =========================
 
     @Scheduled(cron = "${d2os.projection.cycle-sweep.cadence:0 0 4 * * *}")
+    @SchedulerLock(name = "cycle-sweep", lockAtMostFor = "PT10M")
     public void scheduledSweep() {
-        List<UUID> workspaceIds = jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class);
-        for (UUID workspaceId : workspaceIds) {
-            try {
-                sweepWorkspace(workspaceId);
-            } catch (Exception e) {
-                log.warn("cycle sweep failed for workspace {}: {}", workspaceId, e.toString());
+        jobMetrics.time("cycle-sweep", () -> {
+            List<UUID> workspaceIds = jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class);
+            for (UUID workspaceId : workspaceIds) {
+                try {
+                    sweepWorkspace(workspaceId);
+                } catch (Exception e) {
+                    log.warn("cycle sweep failed for workspace {}: {}", workspaceId, e.toString());
+                }
             }
-        }
+        });
     }
 
     /** Package-visible for direct test invocation, same convention as {@code Projector#processWorkspace}. */

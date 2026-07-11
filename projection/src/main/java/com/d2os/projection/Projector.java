@@ -1,11 +1,13 @@
 package com.d2os.projection;
 
+import com.d2os.observability.JobMetrics;
 import com.d2os.projection.cycle.CycleDetector;
 import com.d2os.tenancy.WorkspaceContext;
 import com.d2os.tenancy.security.WorkspaceRlsBinder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -138,6 +140,8 @@ public class Projector {
     private final PayloadSufficiencyAuditor sufficiencyAuditor;
     private final ObjectMapper objectMapper;
     private final CycleDetector cycleDetector;
+    private final JobMetrics jobMetrics;
+    private final ProjectionMetrics projectionMetrics;
 
     public Projector(JdbcTemplate jdbcTemplate,
                      WorkspaceRlsBinder workspaceRlsBinder,
@@ -148,7 +152,9 @@ public class Projector {
                      @Qualifier("projectorTransactionManager") PlatformTransactionManager projectorTransactionManager,
                      PayloadSufficiencyAuditor sufficiencyAuditor,
                      ObjectMapper objectMapper,
-                     CycleDetector cycleDetector) {
+                     CycleDetector cycleDetector,
+                     JobMetrics jobMetrics,
+                     ProjectionMetrics projectionMetrics) {
         this.jdbcTemplate = jdbcTemplate;
         this.workspaceRlsBinder = workspaceRlsBinder;
         this.transactionManager = transactionManager;
@@ -159,21 +165,67 @@ public class Projector {
         this.sufficiencyAuditor = sufficiencyAuditor;
         this.objectMapper = objectMapper;
         this.cycleDetector = cycleDetector;
+        this.jobMetrics = jobMetrics;
+        this.projectionMetrics = projectionMetrics;
     }
 
     @Scheduled(fixedDelayString = "${d2os.projection.consumer-interval-ms:5000}",
                initialDelayString = "${d2os.projection.consumer-interval-ms:5000}")
+    @SchedulerLock(name = "projector-sweep", lockAtMostFor = "PT2M")
     public void sweep() {
-        List<UUID> workspaceIds = jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class);
-        for (UUID workspaceId : workspaceIds) {
-            try {
-                processWorkspace(workspaceId);
-            } catch (Exception e) {
-                // One bad workspace must never stop the sweep — same posture as ReconciliationJob.
-                log.warn("projector sweep failed for workspace {}: {}", workspaceId, e.toString());
+        jobMetrics.time("projector-sweep", () -> {
+            List<UUID> workspaceIds = jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class);
+            double maxLagSeconds = 0.0;
+            long totalOpenGaps = 0L;
+            for (UUID workspaceId : workspaceIds) {
+                try {
+                    processWorkspace(workspaceId);
+                } catch (Exception e) {
+                    // One bad workspace must never stop the sweep — same posture as ReconciliationJob.
+                    log.warn("projector sweep failed for workspace {}: {}", workspaceId, e.toString());
+                }
+                try {
+                    WorkspaceObservation obs = observe(workspaceId);
+                    maxLagSeconds = Math.max(maxLagSeconds, obs.lagSeconds());
+                    totalOpenGaps += obs.openGaps();
+                } catch (Exception e) {
+                    // Metrics are best-effort — a failed observation never affects projection correctness.
+                    log.debug("projection metrics observation failed for workspace {}: {}", workspaceId, e.toString());
+                }
             }
+            // T020: publish the sweep's aggregate to the gauges (d2os.projection.lag.seconds / .gap.open).
+            projectionMetrics.publishSweepObservation(maxLagSeconds, totalOpenGaps);
+        });
+    }
+
+    /**
+     * T020 — computes this workspace's projection lag and OPEN-gap count for {@link ProjectionMetrics},
+     * inside a short RLS-bound read transaction (both source tables are RLS-scoped). These are exactly
+     * the values {@code GraphAdminController#status} exposes per workspace: lag = seconds since the
+     * oldest still-unconsumed outbox row, open gaps = {@code projection_gap} rows with {@code status='OPEN'}.
+     */
+    private WorkspaceObservation observe(UUID workspaceId) {
+        WorkspaceContext.set(workspaceId);
+        try {
+            TransactionTemplate readTx = requiresNew(transactionManager);
+            return readTx.execute(status -> {
+                workspaceRlsBinder.bindCurrentTransaction(workspaceId);
+                long watermark = currentWatermark(workspaceId);
+                Double lag = jdbcTemplate.queryForObject(
+                        "SELECT COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0) FROM event_outbox "
+                                + "WHERE workspace_id = ? AND seq > ?",
+                        Double.class, workspaceId, watermark);
+                Long gaps = jdbcTemplate.queryForObject(
+                        "SELECT count(*) FROM projection_gap WHERE workspace_id = ? AND status = 'OPEN'",
+                        Long.class, workspaceId);
+                return new WorkspaceObservation(lag == null ? 0.0 : lag, gaps == null ? 0L : gaps);
+            });
+        } finally {
+            WorkspaceContext.clear();
         }
     }
+
+    private record WorkspaceObservation(double lagSeconds, long openGaps) {}
 
     /** Package-visible for {@link RebuildEquivalenceIT}-style callers that want to drive one workspace directly. */
     void processWorkspace(UUID workspaceId) {

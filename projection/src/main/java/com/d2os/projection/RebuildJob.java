@@ -1,9 +1,11 @@
 package com.d2os.projection;
 
+import com.d2os.observability.JobMetrics;
 import com.d2os.tenancy.WorkspaceContext;
 import com.d2os.tenancy.security.WorkspaceRlsBinder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -86,6 +88,8 @@ public class RebuildJob {
     private final ProjectorRlsBinder projectorRlsBinder;
     private final PlatformTransactionManager projectorTransactionManager;
     private final EquivalenceVerifier equivalenceVerifier;
+    private final JobMetrics jobMetrics;
+    private final ProjectionMetrics projectionMetrics;
 
     private final Set<UUID> inProgress = ConcurrentHashMap.newKeySet();
     private final ExecutorService onDemandExecutor = Executors.newFixedThreadPool(2,
@@ -98,7 +102,9 @@ public class RebuildJob {
                       GraphWriteRepository graphWriteRepository,
                       ProjectorRlsBinder projectorRlsBinder,
                       @Qualifier("projectorTransactionManager") PlatformTransactionManager projectorTransactionManager,
-                      EquivalenceVerifier equivalenceVerifier) {
+                      EquivalenceVerifier equivalenceVerifier,
+                      JobMetrics jobMetrics,
+                      ProjectionMetrics projectionMetrics) {
         this.jdbcTemplate = jdbcTemplate;
         this.workspaceRlsBinder = workspaceRlsBinder;
         this.transactionManager = transactionManager;
@@ -107,6 +113,8 @@ public class RebuildJob {
         this.projectorRlsBinder = projectorRlsBinder;
         this.projectorTransactionManager = projectorTransactionManager;
         this.equivalenceVerifier = equivalenceVerifier;
+        this.jobMetrics = jobMetrics;
+        this.projectionMetrics = projectionMetrics;
     }
 
     public boolean isInProgress(UUID workspaceId) {
@@ -131,20 +139,23 @@ public class RebuildJob {
     }
 
     @Scheduled(cron = "${d2os.projection.rebuild.schedule:0 0 3 * * SUN}")
+    @SchedulerLock(name = "graph-rebuild", lockAtMostFor = "PT15M")
     public void scheduledSweep() {
-        List<UUID> workspaceIds = jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class);
-        for (UUID workspaceId : workspaceIds) {
-            if (!inProgress.add(workspaceId)) {
-                continue; // an on-demand or overlapping scheduled rebuild is already running
+        jobMetrics.time("graph-rebuild", () -> {
+            List<UUID> workspaceIds = jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class);
+            for (UUID workspaceId : workspaceIds) {
+                if (!inProgress.add(workspaceId)) {
+                    continue; // an on-demand or overlapping scheduled rebuild is already running
+                }
+                try {
+                    rebuild(workspaceId);
+                } catch (Exception e) {
+                    log.error("scheduled rebuild failed for workspace {}: {}", workspaceId, e.toString(), e);
+                } finally {
+                    inProgress.remove(workspaceId);
+                }
             }
-            try {
-                rebuild(workspaceId);
-            } catch (Exception e) {
-                log.error("scheduled rebuild failed for workspace {}: {}", workspaceId, e.toString(), e);
-            } finally {
-                inProgress.remove(workspaceId);
-            }
-        }
+        });
     }
 
     public enum Outcome { PASS, FAIL, SKIPPED_NOT_BOOTSTRAPPED }
@@ -173,6 +184,10 @@ public class RebuildJob {
         });
 
         EquivalenceVerifier.EquivalenceResult equivalence = equivalenceVerifier.verify(workspaceId, newGeneration);
+
+        // T020: feed the d2os.rebuild.equivalence.divergent gauge — this workspace is divergent iff the
+        // equivalence check did not pass (cleared again on the next PASS rebuild).
+        projectionMetrics.recordRebuildResult(workspaceId, !equivalence.isPass());
 
         if (equivalence.isPass()) {
             TransactionTemplate flipTx = requiresNew(projectorTransactionManager);

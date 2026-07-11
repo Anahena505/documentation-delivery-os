@@ -1,5 +1,8 @@
 package com.d2os.tenancy;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -26,15 +29,31 @@ public class RetentionVerificationJob {
     private static final int APPROACHING_WINDOW_DAYS = 90;
 
     private final JdbcTemplate jdbcTemplate;
+    private final MeterRegistry meterRegistry;
 
-    public RetentionVerificationJob(JdbcTemplate jdbcTemplate) {
+    public RetentionVerificationJob(JdbcTemplate jdbcTemplate, MeterRegistry meterRegistry) {
         this.jdbcTemplate = jdbcTemplate;
+        this.meterRegistry = meterRegistry;
     }
 
+    // US2 (T019): per-job USE metrics inline against MeterRegistry (tenancy cannot depend on
+    // observability — observability -> casecore -> tenancy would cycle). Meter names match JobMetrics.
+    private static final String JOB = "retention-verification";
+
     @Scheduled(cron = "${d2os.tenancy.retention.check-cron:0 0 3 * * *}")
+    @SchedulerLock(name = "retention-verification", lockAtMostFor = "PT30M")
     public void checkAllWorkspaces() {
-        for (UUID workspaceId : jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class)) {
-            checkWorkspace(workspaceId);
+        meterRegistry.counter("d2os.job.executions", "job", JOB).increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            for (UUID workspaceId : jdbcTemplate.queryForList("SELECT id FROM list_active_workspace_ids()", UUID.class)) {
+                checkWorkspace(workspaceId);
+            }
+        } catch (RuntimeException e) {
+            meterRegistry.counter("d2os.job.failures", "job", JOB).increment();
+            throw e;
+        } finally {
+            sample.stop(meterRegistry.timer("d2os.job.duration", "job", JOB));
         }
     }
 

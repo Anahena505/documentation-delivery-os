@@ -238,6 +238,16 @@ management:
       enabled: true
     readinessState:
       enabled: true
+  # 008 T016 (US2): distributed tracing via Micrometer Tracing + the OpenTelemetry bridge. Sample
+  # every request (probability 1.0) so spans are complete for correlation; the OTLP export endpoint
+  # defaults EMPTY, which makes the exporter a no-op — the app boots and runs fine with no collector,
+  # and a real deployment sets D2OS_OTLP_ENDPOINT to its OTLP receiver.
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${D2OS_OTLP_ENDPOINT:}
 
 server:
   port: 8080
