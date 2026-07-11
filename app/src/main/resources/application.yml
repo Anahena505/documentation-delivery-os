@@ -221,6 +221,24 @@ d2os:
     # problem worth paging on rather than individually triaging.
     gap-alert-threshold: ${D2OS_PROJECTION_GAP_ALERT_THRESHOLD:10}
 
+# 008 T006 (Foundational): operational surface for observability (US2) and orchestrator probes (US4).
+# Health/liveness/readiness and the Prometheus scrape are the only web-exposed actuator endpoints;
+# WorkspaceContextFilter already exempts /actuator/health from tenant-scoping auth.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+
 server:
   port: 8080
   servlet:

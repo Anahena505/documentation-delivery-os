@@ -63,7 +63,7 @@ These make every task below self-contained so it can be done without extra inves
 
 **Purpose**: config every later story reads. **Complete before Phase 3+.**
 
-- [ ] T006 In `app/src/main/resources/application.yml`, add a top-level `management:` block exposing the
+- [X] T006 In `app/src/main/resources/application.yml`, add a top-level `management:` block exposing the
   operational endpoints both US2 and US4 need:
   `management.endpoints.web.exposure.include: health,info,prometheus,metrics` and
   `management.endpoint.health.probes.enabled: true` and
