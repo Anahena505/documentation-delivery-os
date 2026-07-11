@@ -1,6 +1,8 @@
 package com.d2os.intake;
 
 import com.d2os.casecore.AuditWriter;
+import com.d2os.casecore.CaseInstanceRepository;
+import com.d2os.casecore.CaseStatus;
 import com.d2os.casecore.DecisionRecord;
 import com.d2os.casecore.DecisionRepository;
 import com.d2os.intake.dto.ConfirmCaseTypeRequest;
@@ -8,6 +10,7 @@ import com.d2os.intake.dto.ConfirmClassificationRequest;
 import com.d2os.intake.dto.CreateSubmissionRequest;
 import com.d2os.tenancy.WorkspaceContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +32,7 @@ public class SubmissionService {
     private final CaseTypeClassificationService caseTypeClassificationService;
     private final AuditWriter auditWriter;
     private final DecisionRepository decisionRepository;
+    private final CaseInstanceRepository caseInstanceRepository;
     private final ObjectMapper objectMapper;
 
     public SubmissionService(ProblemSubmissionRepository repository,
@@ -36,12 +40,14 @@ public class SubmissionService {
                              CaseTypeClassificationService caseTypeClassificationService,
                              AuditWriter auditWriter,
                              DecisionRepository decisionRepository,
+                             CaseInstanceRepository caseInstanceRepository,
                              ObjectMapper objectMapper) {
         this.repository = repository;
         this.classificationService = classificationService;
         this.caseTypeClassificationService = caseTypeClassificationService;
         this.auditWriter = auditWriter;
         this.decisionRepository = decisionRepository;
+        this.caseInstanceRepository = caseInstanceRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -99,6 +105,10 @@ public class SubmissionService {
                     "submission " + submissionId + " case type is already confirmed");
         }
 
+        if ("ENHANCEMENT".equals(request.caseType())) {
+            requireDeliveredBaseline(submission);
+        }
+
         String proposedBefore = submission.getProposedCaseType();
         submission.confirmCaseType(request.caseType());
         submission = repository.save(submission);
@@ -121,6 +131,48 @@ public class SubmissionService {
                         "decisionId", decision.getId().toString()));
 
         return submission;
+    }
+
+    /**
+     * Phase 5 (T024, US3, research R4, design decision): ENHANCEMENT has no dedicated {@code
+     * featureId} field anywhere in the intake data model — {@link com.d2os.intake.dto.ConfirmCaseTypeRequest}
+     * only carries {@code caseType}/{@code rationale}, and neither {@link ProblemSubmission} nor {@link
+     * com.d2os.intake.dto.CreateSubmissionRequest} carry a {@code featureId} anywhere. The ONLY
+     * structured place a Feature can be named is inside the submission's opaque {@code formData} map —
+     * the SAME pattern {@link CaseTypeClassificationService#classify} already uses to read {@code
+     * subjectExists}/{@code hasDeliveredBaseline}/{@code requestIntent} out of formData. This method
+     * reads a {@code featureId} key out of formData at confirm time; if it is absent or not a
+     * parseable UUID, that is treated identically to "no baseline" (422) — an Enhancement with no
+     * identifiable Feature has no baseline by construction. This is a deliberate interpretation of
+     * FR-010/contracts {@code /case-type/confirm} 422, not a requirement documented elsewhere.
+     */
+    private void requireDeliveredBaseline(ProblemSubmission submission) {
+        UUID featureId = extractFeatureId(submission.getFormData());
+        if (featureId == null) {
+            throw new NoBaselineException(
+                    "ENHANCEMENT submission " + submission.getId()
+                            + " formData has no parseable featureId — cannot resolve a baseline");
+        }
+        boolean hasDeliveredBaseline = caseInstanceRepository
+                .findFirstByFeatureIdAndStatusOrderByCreatedAtDesc(featureId, CaseStatus.Delivered.name())
+                .isPresent();
+        if (!hasDeliveredBaseline) {
+            throw new NoBaselineException(
+                    "feature " + featureId + " has no Delivered Case — an Enhancement requires a "
+                            + "delivered baseline (FR-010)");
+        }
+    }
+
+    private UUID extractFeatureId(String formDataJson) {
+        try {
+            JsonNode node = objectMapper.readTree(formDataJson).path("featureId");
+            if (node.isMissingNode() || node.isNull()) {
+                return null;
+            }
+            return UUID.fromString(node.asText());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String toJson(Object value) {

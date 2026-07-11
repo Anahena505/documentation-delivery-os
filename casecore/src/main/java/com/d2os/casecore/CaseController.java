@@ -1,5 +1,6 @@
 package com.d2os.casecore;
 
+import com.d2os.casecore.dto.BaselineResponse;
 import com.d2os.casecore.dto.CaseResponse;
 import com.d2os.casecore.dto.CreateCaseRequest;
 import com.d2os.casecore.spi.SubmissionLookup;
@@ -8,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,18 +29,24 @@ public class CaseController {
     private final CaseInstanceRepository caseRepository;
     private final CaseDefinitionSnapshotRepository snapshotRepository;
     private final SubmissionLookup submissionLookup;
+    private final AuditEntryRepository auditEntryRepository;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbcTemplate;
 
     public CaseController(CaseService caseService,
                           CaseInstanceRepository caseRepository,
                           CaseDefinitionSnapshotRepository snapshotRepository,
                           SubmissionLookup submissionLookup,
-                          ObjectMapper objectMapper) {
+                          AuditEntryRepository auditEntryRepository,
+                          ObjectMapper objectMapper,
+                          JdbcTemplate jdbcTemplate) {
         this.caseService = caseService;
         this.caseRepository = caseRepository;
         this.snapshotRepository = snapshotRepository;
         this.submissionLookup = submissionLookup;
+        this.auditEntryRepository = auditEntryRepository;
         this.objectMapper = objectMapper;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /** POST /cases — open a Case from a confirmed submission; 409 on FR-016 conflict. */
@@ -58,6 +66,27 @@ public class CaseController {
         CaseInstance kase = caseRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("case " + id));
         return ResponseEntity.ok(CaseResponse.from(kase, snapshotEntries(id)));
+    }
+
+    /**
+     * GET /cases/{id}/baseline — an Enhancement case's pinned baseline ArtifactRevisions, with {@code
+     * superseded}/{@code deprecated} status surfaced (T025, US3, research R4). 404 when the case isn't
+     * an Enhancement case, or its {@code BaselineResolutionDelegate} step hasn't run yet (no {@code
+     * BASELINE_RESOLVED} audit entry) — both map through the same {@link NoSuchElementException} →
+     * 404 path {@link CaseExceptionHandler} already provides.
+     */
+    @GetMapping("/{id}/baseline")
+    public ResponseEntity<BaselineResponse> baseline(@PathVariable UUID id) {
+        CaseInstance kase = caseRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("case " + id));
+        if (!"enhancement".equalsIgnoreCase(kase.getCaseTypeKey())) {
+            throw new NoSuchElementException("case " + id + " is not an Enhancement case");
+        }
+        AuditEntryRecord entry = auditEntryRepository
+                .findFirstBySubjectTypeAndSubjectIdAndActionOrderByTxTimeDesc(
+                        "case_instance", id, "BASELINE_RESOLVED")
+                .orElseThrow(() -> new NoSuchElementException("case " + id + " has no resolved baseline"));
+        return ResponseEntity.ok(BaselineResponse.from(kase, entry, objectMapper, jdbcTemplate));
     }
 
     private Object snapshotEntries(UUID caseId) {

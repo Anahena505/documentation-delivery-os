@@ -41,16 +41,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * step (recorded as a D4 Decision, T011) gates Case creation (T012) — so a misread problem never
  * launches the wrong pipeline.
  *
- * <p><b>Scope note (why this test doesn't assert Assessment/Enhancement reach Delivered):</b> Phase 3
- * (this feature's US1) only builds classification + confirm + the {@code 412}-until-confirmed gate on
- * Case creation. The Assessment/Enhancement {@code CaseTypeDefinition} catalog content (and their BPMN
- * workflows) ship in later phases (US2/US3 of this same spec, tasks T014-T026) — until then, no
- * published {@code case_type} definition exists for those two keys. So for Assessment/Enhancement this
- * test isolates exactly what Phase 3 guarantees: (a) the DMN proposes the right type, (b) Case creation
- * is blocked 412 before confirm, and (c) after confirm the 412 is gone and creation now fails for a
- * DIFFERENT, later-phase reason (422 — "no published case_type definition"), never for lack of
- * confirmation. Only Initiation (whose catalog content predates this phase) is asserted to actually
- * reach {@code 201 Planned}.
+ * <p><b>Scope note (why this test doesn't assert Assessment reaches Delivered):</b> Phase 3 (this
+ * feature's US1) only builds classification + confirm + the {@code 412}-until-confirmed gate on Case
+ * creation. Assessment's {@code CaseTypeDefinition} catalog content (and its BPMN workflow) ships in a
+ * later phase (US2, tasks T014-T019) — until then, no published {@code case_type} definition exists for
+ * that key. So for Assessment this test isolates exactly what Phase 3 guarantees: (a) the DMN proposes
+ * the right type, (b) Case creation is blocked 412 before confirm, and (c) after confirm the 412 is gone
+ * and creation now fails for a DIFFERENT, later-phase reason (422 — "no published case_type
+ * definition"), never for lack of confirmation.
+ *
+ * <p>Enhancement's catalog content ships with THIS phase (US3, T020-T026 — {@code
+ * CatalogSeedLoader#seedEnhancement}), so its test below is asserted all the way to {@code 201
+ * Planned}, same as Initiation — with a directly-seeded Delivered baseline Case satisfying T024's
+ * confirm-time gate (the no-baseline 422 rejection itself, and a full baseline-anchored run, are
+ * EnhancementBaselineIT's job).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @org.springframework.context.annotation.Import(StubAiGatewayClient.class)
@@ -174,26 +178,37 @@ class CaseRoutingIT {
     }
 
     @Test
-    void enhancementShapeClassifiesAndIsGatedThenFailsForCatalogNotClassificationReasons() {
+    void enhancementShapeClassifiesConfirmsAgainstADeliveredBaselineAndOpensACase() {
         HttpHeaders headers = headers();
+
+        // Phase 5 (T024, US3, research R4): confirming ENHANCEMENT now requires a Feature with a
+        // Delivered baseline Case (read out of the submission's formData.featureId — see
+        // SubmissionService#requireDeliveredBaseline). Seed one directly via JDBC (no real pipeline run
+        // needed just to prove routing/creation — the full baseline-anchored run is EnhancementBaselineIT,
+        // T026); this test only needs the Feature to genuinely carry a Delivered Case row.
+        UUID featureId = newFeature();
+        seedDeliveredBaselineCase(featureId);
 
         // Subject exists, a baseline was already delivered, requester wants it changed -> ENHANCEMENT.
         String submissionId = submit(headers, Map.of(
-                "subjectExists", true, "hasDeliveredBaseline", true, "requestIntent", "change"));
+                "subjectExists", true, "hasDeliveredBaseline", true, "requestIntent", "change",
+                "featureId", featureId.toString()));
         assertProposal(headers, submissionId, "ENHANCEMENT", null, "PROPOSED", false);
 
-        ResponseEntity<Map> preConfirm = createCase(headers, submissionId, newFeature());
+        ResponseEntity<Map> preConfirm = createCase(headers, submissionId, featureId);
         assertEquals(412, preConfirm.getStatusCode().value(), "unconfirmed classification must block Case creation");
 
+        // Confirm succeeds because formData names a Feature with a genuine Delivered baseline (seeded
+        // above) — the 422 "no baseline" rejection path itself is exercised, with its own dedicated
+        // assertions, by EnhancementBaselineIT (T026).
         Map<String, Object> confirmed = confirm(headers, submissionId, "ENHANCEMENT", null);
         assertEquals("CONFIRMED", confirmed.get("classificationStatus"));
 
-        // Enhancement's CaseTypeDefinition ships in a LATER phase (US3, T021) — same reasoning as
-        // Assessment above: post-confirm the failure mode moves from 412 to 422 (catalog content).
-        ResponseEntity<Map> postConfirm = createCase(headers, submissionId, newFeature());
-        assertEquals(422, postConfirm.getStatusCode().value(),
-                () -> "expected the catalog-content failure (US3 not yet built), not the classification "
-                        + "gate; body=" + postConfirm.getBody());
+        // Enhancement's CaseTypeDefinition now ships with this phase (US3, T021) — Case creation
+        // succeeds, same as Initiation's test above.
+        ResponseEntity<Map> postConfirm = createCase(headers, submissionId, featureId);
+        assertEquals(201, postConfirm.getStatusCode().value(), () -> "case create body: " + postConfirm.getBody());
+        assertEquals("Planned", postConfirm.getBody().get("status"));
     }
 
     // ---- 2. Override subtest ------------------------------------------------------------------------
@@ -331,6 +346,25 @@ class CaseRoutingIT {
             throw new RuntimeException(e);
         }
         return featureId;
+    }
+
+    /**
+     * Directly insert a Delivered {@code case_instance} row on {@code featureId} (T024's confirm-time
+     * baseline check only needs a genuine Delivered Case to exist — it doesn't require that case to
+     * have run a real pipeline; {@code submission_id} has no FK, so a fresh random id is fine here).
+     */
+    private void seedDeliveredBaselineCase(UUID featureId) {
+        try (Connection conn = dataSource.getConnection()) {
+            try (PreparedStatement setCtx = conn.prepareStatement("SET app.workspace_id = '" + WORKSPACE_ID + "'")) {
+                setCtx.execute();
+            }
+            insert(conn, "INSERT INTO case_instance (id, workspace_id, feature_id, submission_id, "
+                            + "case_type_key, case_type_version, mode, status, created_by) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, 'mutating', 'Delivered', ?)",
+                    UUID.randomUUID(), WORKSPACE_ID, featureId, UUID.randomUUID(), "initiation", "2.0.0", "test");
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void insert(Connection conn, String sql, Object... params) throws Exception {

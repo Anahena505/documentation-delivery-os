@@ -142,7 +142,7 @@ public class InfluenceEvaluationService {
                 base.promptDefinitionId(), base.promptDefinitionVersion(), base.promptTemplate(),
                 base.rubricDefinitionId(), base.rubricDefinitionVersion(), base.rubricJson(),
                 base.submissionFormDataJson(), injected, tokens, base.attachmentSummaries(),
-                base.regenerationComments());
+                base.regenerationComments(), base.baselineContext());
     }
 
     private int nextSequenceNo(UUID caseId) {

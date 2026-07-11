@@ -8,6 +8,7 @@ import com.d2os.catalog.DefinitionLookupService;
 import com.d2os.catalog.DefinitionView;
 import com.d2os.persona.gateway.WorkspaceScopeGuard;
 import com.d2os.persona.spi.AttachmentSummaryPort;
+import com.d2os.persona.spi.BaselineContextPort;
 import com.d2os.persona.spi.KnowledgeProvider;
 import com.d2os.persona.spi.SubmissionDataPort;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -54,6 +55,11 @@ public class ExecutionEnvelopeBuilder {
     // ObjectProvider so persona-only slice tests (no intake on the path) still wire this builder:
     // getIfAvailable() yields null when no AttachmentSummaryPort bean exists → no summaries (T044).
     private final ObjectProvider<AttachmentSummaryPort> attachmentSummaryPort;
+    // ObjectProvider so persona-only slice tests (no orchestration on the path) still wire this
+    // builder: getIfAvailable() yields null when no BaselineContextPort bean exists → no baseline
+    // context (T023). Non-Enhancement cases also naturally resolve to an empty list (the port has
+    // nothing to read back for them).
+    private final ObjectProvider<BaselineContextPort> baselineContextPort;
     private final WorkspaceScopeGuard workspaceScopeGuard;
     private final int maxItemsPerOperation;
 
@@ -65,6 +71,7 @@ public class ExecutionEnvelopeBuilder {
                                     JdbcTemplate jdbcTemplate,
                                     ObjectProvider<KnowledgeProvider> knowledgeProvider,
                                     ObjectProvider<AttachmentSummaryPort> attachmentSummaryPort,
+                                    ObjectProvider<BaselineContextPort> baselineContextPort,
                                     WorkspaceScopeGuard workspaceScopeGuard,
                                     @Value("${d2os.knowledge.max-items-per-operation:5}") int maxItemsPerOperation) {
         this.caseRepository = caseRepository;
@@ -75,6 +82,7 @@ public class ExecutionEnvelopeBuilder {
         this.jdbcTemplate = jdbcTemplate;
         this.knowledgeProvider = knowledgeProvider;
         this.attachmentSummaryPort = attachmentSummaryPort;
+        this.baselineContextPort = baselineContextPort;
         this.workspaceScopeGuard = workspaceScopeGuard;
         this.maxItemsPerOperation = maxItemsPerOperation;
     }
@@ -111,6 +119,11 @@ public class ExecutionEnvelopeBuilder {
         // AttachmentSummaryPort bean is on the path (persona-only slice tests) or the submission has none.
         List<String> attachmentSummaries = resolveAttachmentSummaries(kase.getSubmissionId());
 
+        // Phase 5 (T023, US3, research R4): Enhancement's resolved baseline reference set. Empty for
+        // every non-Enhancement case (no BASELINE_RESOLVED audit entry to read back) or when no
+        // BaselineContextPort bean is on the path (persona-only slice tests).
+        List<String> baselineContext = resolveBaselineContext(caseId);
+
         // Phase 3 (T013): resolve the persona's knowledge profile from its definition body, retrieve the
         // entitled items, and assert workspace scope (T015) before they enter the envelope.
         List<String> knowledgeProfile = extractKnowledgeProfile(personaDef.body());
@@ -125,7 +138,7 @@ public class ExecutionEnvelopeBuilder {
                 rubricDef.id(), rubricDef.version(), rubricDef.body(),
                 formDataJson,
                 injectedKnowledge, estimatedInjectedTokens,
-                attachmentSummaries, regenerationComments);
+                attachmentSummaries, regenerationComments, baselineContext);
     }
 
     /** Sanitized attachment summaries for the submission, or empty when none/no port is wired (T044). */
@@ -135,6 +148,15 @@ public class ExecutionEnvelopeBuilder {
             return List.of();
         }
         return port.findSummaryTexts(submissionId);
+    }
+
+    /** Enhancement's resolved baseline reference summaries, or empty when none/no port is wired (T023). */
+    private List<String> resolveBaselineContext(UUID caseId) {
+        BaselineContextPort port = baselineContextPort.getIfAvailable();
+        if (port == null) {
+            return List.of();
+        }
+        return port.findBaselineSummaries(caseId);
     }
 
     /**

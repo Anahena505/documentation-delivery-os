@@ -28,6 +28,14 @@ import java.util.UUID;
  * persona step, keeping pre-Phase-5 behavior byte-identical. Like attachment summaries, the renderer
  * places this text inside its own untrusted-data delimiters (T1-a) — a reviewer's comment can never
  * be read as an instruction by the persona.
+ *
+ * <p>Phase 5 (T023, US3, research R4): {@code baselineContext} carries an Enhancement case's resolved
+ * baseline reference summaries (see {@code BaselineContextPort}) — metadata about the pinned baseline
+ * ArtifactRevisions a delta/impact persona is analyzing against. Empty for every non-Enhancement case
+ * (and for every case built before {@code BaselineResolutionDelegate} ran), keeping pre-Phase-5
+ * behavior byte-identical. Same T1-a discipline as attachment summaries: the renderer places this
+ * inside its own untrusted-data delimiters, so baseline content is DATA to compare against, never an
+ * instruction.
  */
 public record PersonaEnvelope(
         UUID caseId,
@@ -44,6 +52,7 @@ public record PersonaEnvelope(
         List<KnowledgeProvider.InjectedItem> injectedKnowledge,
         int estimatedInjectedTokens,
         List<String> attachmentSummaries,
-        String regenerationComments
+        String regenerationComments,
+        List<String> baselineContext
 ) {
 }

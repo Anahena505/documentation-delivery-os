@@ -255,7 +255,7 @@ class DeprecationIT {
         PersonaEnvelope envelope = new PersonaEnvelope(
                 caseId, personaKey, UUID.randomUUID(), "1.0.0",
                 UUID.randomUUID(), "1.0.0", "template", UUID.randomUUID(), "1.0.0", "{}",
-                "{\"description\":\"x\"}", injected, 10, List.of(), null);
+                "{\"description\":\"x\"}", injected, 10, List.of(), null, List.of());
 
         WorkspaceContext.set(WORKSPACE_ID);
         operationExecutionRecorder.record(
