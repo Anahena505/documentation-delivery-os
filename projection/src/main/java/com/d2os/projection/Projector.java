@@ -1,5 +1,6 @@
 package com.d2os.projection;
 
+import com.d2os.projection.cycle.CycleDetector;
 import com.d2os.tenancy.WorkspaceContext;
 import com.d2os.tenancy.security.WorkspaceRlsBinder;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,14 +46,26 @@ import java.util.UUID;
  * Wired here: {@code CASE}/{@code FEATURE}/{@code BELONGS_TO} (case events), {@code
  * ARTIFACT_REVISION}/{@code REQUIREMENT}/{@code OPERATION_EXECUTION}/{@code PRODUCED} (artifact_revision
  * scan), {@code GATE}/{@code GATED_BY} (gate events), {@code TRACES_TO}/{@code DERIVES_FROM}/{@code
- * SATISFIES} (trace_link scan). Deliberately DEFERRED, not wired in this phase: {@code
- * PACKAGE}/{@code execution_package} and {@code DEPENDS_ON}/{@code dependency} (tasks.md T009's own
- * "minimum" scope for the rebuild-equivalence pair names only {@code case_instance}, {@code
- * artifact_revision}, {@code gate_instance}, {@code trace_link} — {@code dependency} additionally
- * has NO writer anywhere in the repo today, confirmed dead code exactly as {@link NodeEdgeMapper}'s
- * own javadoc documents); {@code KNOWLEDGE_ITEM_VERSION}/{@code INJECTED_INTO} (explicitly assigned
+ * SATISFIES} (trace_link scan), and — as of Phase 5 US3 (T021, {@link com.d2os.projection.cycle.CycleDetector})
+ * — {@code DEPENDS_ON} (dependency scan). Deliberately DEFERRED, not wired in this phase: {@code
+ * PACKAGE}/{@code execution_package} (tasks.md T009's own "minimum" scope for the rebuild-equivalence
+ * pair names only {@code case_instance}, {@code artifact_revision}, {@code gate_instance}, {@code
+ * trace_link}); {@code KNOWLEDGE_ITEM_VERSION}/{@code INJECTED_INTO} (explicitly assigned
  * to Phase 6/US4 by tasks.md T025 — "ensure the projector materializes INJECTED_INTO edges..."
  * implies it is NOT yet wired); {@code DEFINITION_VERSION} (no task in Phase 3-6 names a concrete
+ * source table for it).
+ *
+ * <h3>{@code dependency}/{@code DEPENDS_ON} — wired, still writer-less (Phase 5 US3, T021)</h3>
+ * {@link NodeEdgeMapper#mapDependency} was implemented in Phase 2 as dead code because no
+ * application path wrote {@code dependency} rows (verified then, still true now — this task did
+ * not add one; that remains a separate, out-of-scope gap). {@link com.d2os.projection.cycle.CycleDetector}
+ * (T021) needs {@code DEPENDS_ON} edges to exist to have anything to check, so this phase wires the
+ * scan on anyway: whenever something DOES write a {@code dependency} row (today, only integration
+ * tests via direct SQL — see {@code CycleDetectionIT}), this sweep picks it up like any other
+ * source table, exactly as {@link #scanTraceLinks} already does for {@code trace_link}. {@link
+ * RebuildJob} and {@link EquivalenceVerifier} are wired identically in this same phase so a
+ * rebuild does not silently drop the type and equivalence does not spuriously flag it (see this
+ * class's own reasoning below on keeping the three in lockstep).
  * source query for it). This keeps the incremental Projector, {@link RebuildJob}, and {@link
  * EquivalenceVerifier} covering EXACTLY the same type set — wiring a type into the incremental
  * projector that the rebuild/equivalence pair does not also check would make every rebuild silently
@@ -118,6 +131,7 @@ public class Projector {
     private final PlatformTransactionManager projectorTransactionManager;
     private final PayloadSufficiencyAuditor sufficiencyAuditor;
     private final ObjectMapper objectMapper;
+    private final CycleDetector cycleDetector;
 
     public Projector(JdbcTemplate jdbcTemplate,
                      WorkspaceRlsBinder workspaceRlsBinder,
@@ -127,7 +141,8 @@ public class Projector {
                      ProjectorRlsBinder projectorRlsBinder,
                      @Qualifier("projectorTransactionManager") PlatformTransactionManager projectorTransactionManager,
                      PayloadSufficiencyAuditor sufficiencyAuditor,
-                     ObjectMapper objectMapper) {
+                     ObjectMapper objectMapper,
+                     CycleDetector cycleDetector) {
         this.jdbcTemplate = jdbcTemplate;
         this.workspaceRlsBinder = workspaceRlsBinder;
         this.transactionManager = transactionManager;
@@ -137,6 +152,7 @@ public class Projector {
         this.projectorTransactionManager = projectorTransactionManager;
         this.sufficiencyAuditor = sufficiencyAuditor;
         this.objectMapper = objectMapper;
+        this.cycleDetector = cycleDetector;
     }
 
     @Scheduled(fixedDelayString = "${d2os.projection.consumer-interval-ms:5000}",
@@ -185,6 +201,13 @@ public class Projector {
 
         if (!batch.gaps().isEmpty()) {
             sufficiencyAuditor.alertIfPastThreshold(workspaceId);
+        }
+
+        List<GraphEdge> newDependsOnEdges = batch.edges().stream()
+                .filter(e -> NodeEdgeMapper.EDGE_DEPENDS_ON.equals(e.getEdgeType()))
+                .toList();
+        if (!newDependsOnEdges.isEmpty()) {
+            cycleDetector.checkIncremental(workspaceId, generation, newDependsOnEdges);
         }
     }
 
@@ -285,6 +308,7 @@ public class Projector {
 
         scanTraceLinks(workspaceId, generation, nodes, edges);
         scanArtifactRevisions(workspaceId, generation, nodes, edges);
+        scanDependencies(workspaceId, generation, nodes, edges);
 
         return new ReadBatch(nodes, edges, gaps, watermark, newWatermark);
     }
@@ -343,6 +367,23 @@ public class Projector {
                     (String) row.get("to_type"), (UUID) row.get("to_id"), (String) row.get("link_type"),
                     toOffsetDateTime(row.get("created_at")));
             NodeEdgeMapper.MappingResult result = mapper.mapTraceLink(fact, generation);
+            nodes.addAll(result.nodes());
+            edges.addAll(result.edges());
+        }
+    }
+
+    /** Phase 5 US3 (T021) — see class javadoc's "dependency/DEPENDS_ON — wired, still writer-less" section. */
+    private void scanDependencies(UUID workspaceId, int generation, List<GraphNode> nodes, List<GraphEdge> edges) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, from_type, from_id, to_type, to_id, dep_type, created_at "
+                        + "FROM dependency WHERE workspace_id = ?",
+                workspaceId);
+        for (Map<String, Object> row : rows) {
+            NodeEdgeMapper.DependencyFact fact = new NodeEdgeMapper.DependencyFact(workspaceId,
+                    (UUID) row.get("id"), (String) row.get("from_type"), (UUID) row.get("from_id"),
+                    (String) row.get("to_type"), (UUID) row.get("to_id"), (String) row.get("dep_type"),
+                    toOffsetDateTime(row.get("created_at")));
+            NodeEdgeMapper.MappingResult result = mapper.mapDependency(fact, generation);
             nodes.addAll(result.nodes());
             edges.addAll(result.edges());
         }

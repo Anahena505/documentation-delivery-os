@@ -35,15 +35,18 @@ import java.util.UUID;
  *
  * <h2>Scope (matches {@link Projector}/{@link RebuildJob} exactly)</h2>
  * Node types: {@code CASE}, {@code FEATURE}, {@code ARTIFACT_REVISION}, {@code REQUIREMENT}, {@code
- * OPERATION_EXECUTION}, {@code GATE}, plus whatever generic node types {@code trace_link}'s
- * endpoints resolve to (commonly {@code OPERATION_EXECUTION}, since {@code
- * ConsistencyService#writeConflictEdge} — the only real writer — links two of those). Edge types:
- * {@code BELONGS_TO}, {@code PRODUCED}, {@code GATED_BY}, {@code TRACES_TO}/{@code DERIVES_FROM}/
- * {@code SATISFIES}. See {@link Projector}'s javadoc for why {@code PACKAGE}/{@code DEPENDS_ON}/
- * {@code KNOWLEDGE_ITEM_VERSION}/{@code DEFINITION_VERSION} are deferred out of Phase 3 — this
- * class only checks what the projector/rebuild pair actually populate; checking a type nothing
- * builds would either always spuriously fail (candidate empty, truth non-empty) or always trivially
- * pass (both empty), neither of which is a meaningful check.
+ * OPERATION_EXECUTION}, {@code GATE}, plus whatever generic node types {@code trace_link}'s and,
+ * as of Phase 5 US3 (T021), {@code dependency}'s endpoints resolve to (commonly {@code
+ * OPERATION_EXECUTION}, since {@code ConsistencyService#writeConflictEdge} — the only real
+ * trace_link writer — links two of those; {@code dependency} itself is still writer-less at the
+ * application layer, see {@link Projector}'s javadoc, but checked here in lockstep with the
+ * projector/rebuild pair). Edge types: {@code BELONGS_TO}, {@code PRODUCED}, {@code GATED_BY},
+ * {@code TRACES_TO}/{@code DERIVES_FROM}/{@code SATISFIES}, {@code DEPENDS_ON}. See {@link
+ * Projector}'s javadoc for why {@code PACKAGE}/{@code KNOWLEDGE_ITEM_VERSION}/{@code
+ * DEFINITION_VERSION} are still deferred — this class only checks what the projector/rebuild pair
+ * actually populate; checking a type nothing builds would either always spuriously fail (candidate
+ * empty, truth non-empty) or always trivially pass (both empty), neither of which is a meaningful
+ * check.
  *
  * <h2>Provenance convention</h2>
  * {@code source_ref} for every type here is the source row's own primary-key id (the "self-id"
@@ -198,6 +201,18 @@ public class EquivalenceVerifier {
                     .add(row.get("to_id").toString());
         }
 
+        // dependency endpoints (Phase 5 US3, T021) — same generic node_type resolution as trace_link,
+        // above; still writer-less at the application layer (see Projector's javadoc) but checked
+        // whenever a row DOES exist (today, only via direct test SQL).
+        List<Map<String, Object>> dependencies = jdbcTemplate.queryForList(
+                "SELECT from_type, from_id, to_type, to_id FROM dependency WHERE workspace_id = ?", workspaceId);
+        for (Map<String, Object> row : dependencies) {
+            byType.computeIfAbsent(nodeTypeForSourceTable((String) row.get("from_type")), t -> new TreeSet<>())
+                    .add(row.get("from_id").toString());
+            byType.computeIfAbsent(nodeTypeForSourceTable((String) row.get("to_type")), t -> new TreeSet<>())
+                    .add(row.get("to_id").toString());
+        }
+
         return byType;
     }
 
@@ -259,6 +274,18 @@ public class EquivalenceVerifier {
                     nodeTypeForSourceTable((String) row.get("to_type")), row.get("to_id").toString(),
                     row.get("id").toString());
             byType.computeIfAbsent(edgeType, t -> new TreeSet<>()).add(key);
+        }
+
+        // DEPENDS_ON: dependency, sourceRef = dependency row id (self-id convention, Phase 5 US3, T021).
+        List<Map<String, Object>> dependencies = jdbcTemplate.queryForList(
+                "SELECT id, from_type, from_id, to_type, to_id FROM dependency WHERE workspace_id = ?",
+                workspaceId);
+        for (Map<String, Object> row : dependencies) {
+            String key = edgeIdentity(
+                    nodeTypeForSourceTable((String) row.get("from_type")), row.get("from_id").toString(),
+                    nodeTypeForSourceTable((String) row.get("to_type")), row.get("to_id").toString(),
+                    row.get("id").toString());
+            byType.computeIfAbsent(NodeEdgeMapper.EDGE_DEPENDS_ON, t -> new TreeSet<>()).add(key);
         }
 
         return byType;
