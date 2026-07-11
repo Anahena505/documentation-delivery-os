@@ -54,6 +54,18 @@ flowable:
       queue-capacity: 256
 
 d2os:
+  security:
+    jwt:
+      # HMAC signing secret for workspace-scoping JWTs (T067, Principle IV). NO default — like the DB
+      # and storage passwords above, an unset secret must fail loudly, never silently accept requests.
+      # Generate with e.g. `openssl rand -base64 32` (HS256 requires >= 256 bits).
+      secret: ${D2OS_JWT_SECRET:}
+      issuer: ${D2OS_JWT_ISSUER:d2os}
+      expiration-minutes: ${D2OS_JWT_EXPIRATION_MINUTES:60}
+      # Unauthenticated X-Workspace-Id header fallback (the v1/T010 stopgap). MUST stay false in any
+      # real deployment — true only in app/src/test/resources/application.properties, so existing
+      # integration tests (authored before JWT support existed) keep passing unchanged.
+      allow-header-workspace-fallback: ${D2OS_ALLOW_HEADER_WORKSPACE_FALLBACK:false}
   ai-gateway:
     # Provider-agnostic; the gateway is the sole call site (AS-5, Principle II).
     provider: ${D2OS_AI_PROVIDER:anthropic}
