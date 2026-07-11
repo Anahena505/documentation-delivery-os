@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title th:text="'Catalog Studio - Review ' + ${gate.gateDefinitionKey}">Review Gate</title>
+    <!-- diff2html island (T002/tasks.md T015) -- vendored under static/studio/vendor/diff2html;
+         not yet dropped into this sandbox (no outbound internet access, same flagged gap T002/T011
+         already document) -- referenced so this page "just works" once a later, network-enabled
+         step vendors the real files (see static/studio/vendor/README.md). Until then the page
+         degrades to the raw unified-diff <pre> block below the (currently inert) mount point. -->
+    <link rel="stylesheet" href="/studio/vendor/diff2html/diff2html.min.css"/>
+    <script src="/studio/vendor/diff2html/diff2html.min.js" defer="defer"></script>
+</head>
+<body>
+<p><a th:href="@{/studio/drafts}">&larr; back to drafts</a></p>
+<h1 th:text="'Review: ' + ${gate.gateDefinitionKey} + ' v' + ${gate.gateDefinitionVersion}">Review</h1>
+<p>
+    Gate status: <strong th:text="${gate.status}">OPEN</strong>
+    | subject: <span th:text="${gate.subjectType} + ' ' + ${gate.subjectId}">subject</span>
+</p>
+
+<div th:if="${subject != null}">
+    <h2 th:text="${subject.type} + ':' + ${subject.key} + ' v' + ${subject.version}">Subject</h2>
+    <p>Pinned content hash: <code th:text="${subject.checksum}">-</code></p>
+</div>
+
+<h2>Prompt / content diff</h2>
+<p th:if="${deltaReport == null}">
+    No delta report is attached to this gate (tasks.md T014) &mdash; either this is the first-ever
+    publish of this <code>(type, key)</code> (no prior published version exists to diff against) or
+    the review has not produced one yet.
+</p>
+
+<div th:if="${deltaReport != null}">
+    <p>Diff hash (SHA-256 over the unified diff, tamper check): <code th:text="${deltaReport.diffHash}">-</code></p>
+
+    <!-- The diff2html island (Diff2Html.html(...)) is meant to mount here once T002 vendors the
+         real JS/CSS -- reads the raw unified-diff text from the hidden #diff-raw element below
+         (kept out of inline JS deliberately, so Thymeleaf's normal th:text escaping handles the
+         diff content safely -- no th:inline="javascript" string-splicing of untrusted/large text
+         into a script body). Genuinely inert placeholder until then, the same honest gap T011's
+         dmn-js container documents. -->
+    <div id="diff2html-container">
+        <p><em>Rendered diff mounts here once diff2html is vendored (T002). Raw unified diff is
+            shown below in the meantime.</em></p>
+    </div>
+    <pre id="diff-raw" th:text="${diffContent}" style="white-space: pre-wrap; border: 1px solid #ccc; padding: 8px;"></pre>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            if (typeof Diff2Html === 'undefined') {
+                return; // diff2html not vendored yet in this environment (T002's flagged gap)
+            }
+            var raw = document.getElementById('diff-raw').textContent;
+            var container = document.getElementById('diff2html-container');
+            container.innerHTML = Diff2Html.html(raw, { drawFileList: false, outputFormat: 'line-by-line' });
+        });
+    </script>
+</div>
+</body>
+</html>

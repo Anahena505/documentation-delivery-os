@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Catalog Studio &mdash; Drafts</title>
+    <!-- htmx island (T002/tasks.md T011) -- vendored under static/studio/vendor/htmx; not yet
+         dropped into this sandbox (no outbound internet access), referenced so it "just works"
+         once a network-enabled step vendors the real file (see vendor/README.md). -->
+    <script src="/studio/vendor/htmx/htmx.min.js" defer="defer"></script>
+</head>
+<body>
+<h1>Catalog Studio &mdash; Drafts</h1>
+<p>All Draft / InReview definition versions visible to this workspace (tasks.md T011, US1). None
+   of these rows are resolvable by any running case until published (Principle I).</p>
+
+<table border="1" cellpadding="4">
+    <thead>
+    <tr>
+        <th>Type</th>
+        <th>Key</th>
+        <th>Version</th>
+        <th>Status</th>
+        <th></th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="d : ${drafts}">
+        <td th:text="${d.type}">type</td>
+        <td th:text="${d.key}">key</td>
+        <td th:text="${d.version}">version</td>
+        <td th:text="${d.status}">status</td>
+        <td><a th:href="@{'/studio/drafts/' + ${d.id}}">open</a></td>
+    </tr>
+    </tbody>
+</table>
+<p th:if="${#lists.isEmpty(drafts)}">No drafts yet &mdash; create one via
+   <code>POST /api/v1/catalog/drafts</code>.</p>
+</body>
+</html>

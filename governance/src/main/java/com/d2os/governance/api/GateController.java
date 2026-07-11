@@ -64,7 +64,10 @@ public class GateController {
             gates = gateInstanceRepository.findAll();
         }
         return gates.stream()
-                .filter(g -> caseId == null || g.getCaseInstanceId().equals(caseId))
+                // caseId.equals(...), not the reverse: a DEFINITION_VERSION-subject gate (studio
+                // publish review, V27) can have a null caseInstanceId, so g.getCaseInstanceId()
+                // must never be the receiver of .equals() here.
+                .filter(g -> caseId == null || caseId.equals(g.getCaseInstanceId()))
                 .filter(g -> assignedRole == null || assignedRole.equals(defaultRoleFor(g)))
                 .map(GateSummary::of)
                 .toList();
@@ -101,6 +104,15 @@ public class GateController {
      * diff a comment-and-regenerate cycle (or a reopen, US3) attached to this gate. 404 both when the
      * gate itself doesn't exist and when it exists but no regeneration/reopen has produced a delta yet
      * ({@code deltaReportId} is null) — the same "nothing to show" outcome either way.
+     *
+     * <p><b>Shape-agnostic (tasks.md T014 verification)</b>: this endpoint just resolves whatever
+     * {@link DeltaReport} row {@code gate_instance.delta_report_id} points at and returns it — it
+     * never branches on which of the two V26 shapes (artifact-triple vs. definition-pair) the row
+     * is, so a studio publish-review gate's definition-pair delta report round-trips through the
+     * exact same route an artifact regeneration's does. {@link DeltaReportView} was extended with
+     * {@code fromDefinitionId}/{@code toDefinitionId} (previously only the artifact-triple fields
+     * were exposed) so the definition-pair shape's identifying ids are visible in the response too,
+     * not just {@code diffContent}/{@code diffHash}.
      */
     @GetMapping("/{gateId}/delta-report")
     public ResponseEntity<DeltaReportView> deltaReport(@PathVariable UUID gateId) {
@@ -126,6 +138,7 @@ public class GateController {
         }
         return new GateDetail(g.getId(), g.getCaseInstanceId(), g.getGateType().name(), g.getGateDefinitionKey(),
                 g.getGateDefinitionVersion(), g.getStatus(), g.getSubjectArtifactRevisionId(),
+                g.getSubjectType().name(), g.getSubjectId(),
                 g.getEscalationPolicyKey(), g.getEscalationPolicyVersion(), g.getDecisionId(),
                 g.getOpenedAt(), g.getDecidedAt(), inputsRef, g.getReviewerComments(), g.getDeltaReportId());
     }
@@ -146,19 +159,31 @@ public class GateController {
         }
     }
 
-    /** {@code GET /gates/{id}} — GateSummary plus the resolved {@code inputsRef} (FR-002/003). */
+    /**
+     * {@code GET /gates/{id}} — GateSummary plus the resolved {@code inputsRef} (FR-002/003), plus
+     * the polymorphic {@code subjectType}/{@code subjectId} (V26, tasks.md T013/T014) — the studio
+     * review page ({@code studio.ReviewPageController}, T015) reads these to resolve which {@code
+     * DefinitionAsset} a {@code DEFINITION_VERSION} gate concerns.
+     */
     public record GateDetail(UUID id, UUID caseInstanceId, String gateType, String gateDefinitionKey,
                              int gateDefinitionVersion, String status, UUID subjectArtifactRevisionId,
+                             String subjectType, UUID subjectId,
                              String escalationPolicyKey, Integer escalationPolicyVersion,
                              UUID decisionId, OffsetDateTime openedAt, OffsetDateTime decidedAt,
                              Object inputsRef, String reviewerComments, UUID deltaReportId) {}
 
-    /** {@code GET /gates/{id}/delta-report} response body (T021). */
+    /**
+     * {@code GET /gates/{id}/delta-report} response body (T021, extended by T014 with the V26
+     * definition-pair shape's {@code fromDefinitionId}/{@code toDefinitionId} — both null for an
+     * artifact-triple-shaped report, and {@code artifactId}/{@code fromRevisionId}/{@code
+     * toRevisionId} null for a definition-pair-shaped one; exactly one pair is populated per row).
+     */
     public record DeltaReportView(UUID id, UUID artifactId, UUID fromRevisionId, UUID toRevisionId,
+                                  UUID fromDefinitionId, UUID toDefinitionId,
                                   String diffContent, String diffHash, OffsetDateTime createdAt) {
         static DeltaReportView of(DeltaReport d) {
             return new DeltaReportView(d.getId(), d.getArtifactId(), d.getFromRevisionId(), d.getToRevisionId(),
-                    d.getDiffContent(), d.getDiffHash(), d.getCreatedAt());
+                    d.getFromDefinitionId(), d.getToDefinitionId(), d.getDiffContent(), d.getDiffHash(), d.getCreatedAt());
         }
     }
 }

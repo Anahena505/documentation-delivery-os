@@ -81,6 +81,29 @@ public class GateService {
     }
 
     /**
+     * Polymorphic-subject overload (V26, research R3, T4-b, tasks.md T006): opens a gate against
+     * any {@code (subjectType, subjectId)} pair — e.g. {@code (DEFINITION_VERSION,
+     * definition_asset.id)} for the studio's D4 publish gate — rather than only an
+     * ArtifactRevision. Deliberately a NEW overload, not a change to the existing {@code open}
+     * signature above: {@code GateTaskBridge} (orchestration, the only current caller) keeps
+     * calling the original ARTIFACT_REVISION-shaped overload unchanged. {@code decide(...)} needs
+     * no corresponding change — it is opaque to subject type (research R3).
+     */
+    @Transactional
+    public GateInstance open(UUID workspaceId, UUID caseInstanceId, GateType gateType,
+                             String gateDefinitionKey, int gateDefinitionVersion,
+                             GateInstance.GateSubjectType subjectType, UUID subjectId, String inputsRef,
+                             String escalationPolicyKey, Integer escalationPolicyVersion,
+                             String engineTaskId) {
+        GateInstance gate = new GateInstance(UUID.randomUUID(), workspaceId, caseInstanceId, gateType,
+                gateDefinitionKey, gateDefinitionVersion, subjectType, subjectId, inputsRef,
+                escalationPolicyKey, escalationPolicyVersion, engineTaskId);
+        gateInstanceRepository.save(gate);
+        gateEventPublisher.publishOpened(gate);
+        return gate;
+    }
+
+    /**
      * Decide an OPEN gate. Order of checks matches the design (T014): gate must be OPEN (else {@link
      * IllegalGateTransitionException}, 409), actor must not be barred by non-self-review (else {@link
      * SelfReviewNotAllowedException}, 403), then the Decision + AuditEntry + outbox event are written
@@ -146,7 +169,10 @@ public class GateService {
      * decides its own gate.
      */
     private void requireNotSelfReview(GateInstance gate, String actorId) {
-        if (actorId == null) {
+        if (actorId == null || gate.getCaseInstanceId() == null) {
+            // V27 (tasks.md T013): a DEFINITION_VERSION-subject gate (studio publish review) has no
+            // owning case to compare the actor against — self-review is a Case-submitter concept
+            // that doesn't apply to a catalog publish, so there is nothing to check here.
             return;
         }
         caseInstanceRepository.findById(gate.getCaseInstanceId()).ifPresent(kase -> {

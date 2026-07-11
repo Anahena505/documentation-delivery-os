@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title th:text="'Catalog Studio - ' + ${draft.type} + ':' + ${draft.key} + ' v' + ${draft.version}">
+        Edit Draft
+    </title>
+    <!-- JS islands (T002/tasks.md T011) — htmx everywhere; diff2html + dmn-js only matter once a
+         gate review (US2) or a Rule draft (this story) needs them. None of the three are actually
+         vendored yet in this sandbox (no outbound internet access) — paths reference where a later,
+         network-enabled step will drop the real files (see static/studio/vendor/README.md); the
+         page degrades to the plain server-rendered form below until then. -->
+    <script src="/studio/vendor/htmx/htmx.min.js" defer="defer"></script>
+    <th:block th:if="${draft.type == 'rule'}">
+        <script src="/studio/vendor/dmn-js/dmn-modeler.development.js" defer="defer"></script>
+        <link rel="stylesheet" href="/studio/vendor/dmn-js/assets/diagram-js.css"/>
+    </th:block>
+</head>
+<body>
+<p><a th:href="@{/studio/drafts}">&larr; back to drafts</a></p>
+<h1 th:text="${draft.type} + ':' + ${draft.key} + ' v' + ${draft.version}">Draft</h1>
+<p>Status: <strong th:text="${draft.status}">Draft</strong></p>
+
+<!-- Rule drafts: the dmn-js decision-table editor is meant to mount here client-side, GET raw XML
+     from /api/v1/catalog/drafts/{id}/dmn-xml (DmnEditorBridge, T010) and PUT the edited XML back
+     to the same endpoint. Not wired client-side yet — inert placeholder until T002 lands. -->
+<div id="dmn-editor-container" th:if="${draft.type == 'rule'}">
+    <p><em>DMN decision-table editor mounts here once dmn-js is vendored (T002). Server-side bridge
+        endpoints are live: <code th:text="'GET/PUT /api/v1/catalog/drafts/' + ${draft.id} + '/dmn-xml'">
+        </code>.</em></p>
+</div>
+
+<form th:if="${editable}" method="post" th:action="@{'/studio/drafts/' + ${draft.id}}">
+    <p>
+        <label for="body">Body (JSON)</label><br/>
+        <textarea id="body" name="body" rows="20" cols="90" th:text="${bodyJson}"></textarea>
+    </p>
+    <button type="submit">Save</button>
+</form>
+<p th:unless="${editable}">
+    This draft is frozen (status <span th:text="${draft.status}">InReview</span>) and cannot be
+    edited here &mdash; only <code>Draft</code>-status rows are editable (research R2's InReview
+    freeze, enforced by <code>DefinitionAsset#updateBody</code>).
+</p>
+</body>
+</html>

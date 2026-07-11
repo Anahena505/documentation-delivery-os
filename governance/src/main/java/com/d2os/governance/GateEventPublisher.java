@@ -80,7 +80,9 @@ public class GateEventPublisher {
         payload.put("gateType", gate.getGateType().name());
         payload.put("gateDefinitionKey", gate.getGateDefinitionKey());
         payload.put("gateDefinitionVersion", gate.getGateDefinitionVersion());
-        payload.put("caseInstanceId", gate.getCaseInstanceId().toString());
+        // V27 (tasks.md T013): a DEFINITION_VERSION-subject gate (studio publish review) has no
+        // owning case — caseInstanceId is null for those rows.
+        payload.put("caseInstanceId", gate.getCaseInstanceId() == null ? null : gate.getCaseInstanceId().toString());
         payload.put("workspaceId", gate.getWorkspaceId().toString());
         payload.put("subjectArtifactRevisionId",
                 gate.getSubjectArtifactRevisionId() == null ? null : gate.getSubjectArtifactRevisionId().toString());

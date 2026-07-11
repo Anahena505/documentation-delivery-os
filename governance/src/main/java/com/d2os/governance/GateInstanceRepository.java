@@ -23,4 +23,14 @@ public interface GateInstanceRepository extends JpaRepository<GateInstance, UUID
      * eventual delta report).
      */
     Optional<GateInstance> findFirstByCaseInstanceIdAndStatusOrderByDecidedAtDesc(UUID caseInstanceId, String status);
+
+    /**
+     * Tasks.md T016/T017: {@code studio.PublishService.publish} requires EVERY gate opened against
+     * a draft's {@code (DEFINITION_VERSION, draftId)} subject to be {@code APPROVED} — one gate for
+     * an ordinary publish (the D4 catalog-owner gate), two for a MAJOR-version bump (D4 plus the
+     * architecture-board gate, T017). {@code subjectType} is passed as the raw enum-name string
+     * (matching how {@link GateInstance#subjectType} is actually persisted) rather than the enum
+     * itself, since Spring Data derives this query straight off the entity's String-typed field.
+     */
+    List<GateInstance> findBySubjectTypeAndSubjectId(String subjectType, UUID subjectId);
 }

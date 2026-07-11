@@ -65,4 +65,38 @@ public class DeltaReportService {
         String text = new String(bytes, StandardCharsets.UTF_8);
         return Arrays.asList(text.split("\n", -1));
     }
+
+    /**
+     * Diff two {@code DefinitionAsset} bodies directly (tasks.md T014, research R3) — the studio's
+     * D4 publish-review content (prompt/persona diffs, or a canonical-JSON content diff for any
+     * other type; this method makes no type distinction, since both are "diff this JSON text
+     * against that JSON text" — see {@code studio.PublishService} for why one code path serves
+     * both). Unlike {@link #generate}, there is no {@link ObjectStoreClient}/{@code
+     * ArtifactRevision} involved: content already lives in-memory as {@code
+     * definition_asset.body}, and the caller is expected to have already pretty-printed both
+     * bodies for a readable diff (mirrors {@code StudioPageController}'s own pretty-print
+     * convention) before calling this. Persists using the V26 definition-pair {@code delta_report}
+     * shape ({@code from_definition_id}/{@code to_definition_id}; the artifact-triple columns stay
+     * null — {@code chk_delta_report_subject_shape} enforces exactly one shape per row).
+     *
+     * <p>{@code fromDefinitionId}/{@code toDefinitionId} must both be non-null (the CHECK
+     * constraint requires it) — there is no "diff against nothing" row for a first-ever publish of
+     * a new key; callers must skip calling this entirely in that case.
+     */
+    @Transactional
+    public DeltaReport generateForDefinitions(UUID workspaceId, UUID fromDefinitionId, UUID toDefinitionId,
+                                              String fromBodyPretty, String toBodyPretty) {
+        List<String> fromLines = Arrays.asList((fromBodyPretty == null ? "" : fromBodyPretty).split("\n", -1));
+        List<String> toLines = Arrays.asList((toBodyPretty == null ? "" : toBodyPretty).split("\n", -1));
+
+        Patch<String> patch = DiffUtils.diff(fromLines, toLines);
+        List<String> unifiedDiffLines = UnifiedDiffUtils.generateUnifiedDiff(
+                "definition-" + fromDefinitionId, "definition-" + toDefinitionId, fromLines, patch, 3);
+        String diffContent = String.join("\n", unifiedDiffLines);
+        String diffHash = HashUtil.sha256Hex(diffContent);
+
+        DeltaReport report = new DeltaReport(UUID.randomUUID(), workspaceId, fromDefinitionId, toDefinitionId,
+                diffContent, diffHash);
+        return deltaReportRepository.save(report);
+    }
 }
