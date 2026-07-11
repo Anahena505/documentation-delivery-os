@@ -1,0 +1,84 @@
+openapi: 3.1.0
+info:
+  title: D2OS Authentication & RBAC Contract (feature 008)
+  version: 0.1.0
+  description: >-
+    Contract change introduced by feature 008. This does NOT add domain endpoints; it changes the
+    security scheme applied to the EXISTING 80 endpoints and defines the authorization semantics for
+    role-restricted operations. The per-feature domain contracts (001-007) are unchanged in shape;
+    they inherit the security scheme below.
+
+# --- Security scheme change: HS256 shared-secret JWT -> OIDC RS256/ES256 verified against IdP JWKS ---
+components:
+  securitySchemes:
+    oidcBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        OIDC access token issued by the organization's identity provider, signed RS256/ES256 and
+        verified against the provider's JWKS. Required claims:
+          - sub           : authenticated individual (becomes actor_user_id on decisions)
+          - workspace_id   : tenant scope (unchanged from prior scheme; binds Postgres RLS)
+          - roles | groups : authorities used for role-restricted operations
+        The prior unauthenticated X-Workspace-Id header fallback is REMOVED (was default-off/test-only).
+
+  responses:
+    Unauthorized:
+      description: No token, or token failed signature/issuer/expiry/JWKS verification.
+    Forbidden:
+      description: Authenticated, but the principal lacks the role required for this operation.
+
+  schemas:
+    ActorStamp:
+      description: Actor identity recorded on every trust-sensitive decision (additive to audit records).
+      type: object
+      required: [actorUserId, actorRole]
+      properties:
+        actorUserId:
+          type: string
+          description: IdP `sub` of the authenticated decision-maker.
+        actorRole:
+          type: string
+          description: Role under which the decision was authorized; MUST be a role the actor holds.
+
+security:
+  - oidcBearer: []
+
+# --- Authorization semantics applied to existing role-restricted operations ---
+# These paths already exist (specs 005/006); 008 only pins their auth behavior.
+paths:
+  /gates/{gateId}/decision:
+    post:
+      summary: (existing) Approve / reject / reopen a governance gate — now RBAC-enforced + actor-stamped
+      security:
+        - oidcBearer: []
+      responses:
+        "200":
+          description: Decision recorded, including the ActorStamp (who + role) in the audit chain.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Caller lacks a governance-approver role for this gate.
+  /catalog/definitions/{id}/publish:
+    post:
+      summary: (existing) Publish a catalog definition version — restricted to catalog-owner
+      security:
+        - oidcBearer: []
+      responses:
+        "200": { description: Published; audit record carries the ActorStamp. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Caller is not a catalog-owner. }
+  /knowledge/promote:
+    post:
+      summary: (existing) Cross-boundary promotion to the global library — default-deny + RBAC + actor-stamped
+      security:
+        - oidcBearer: []
+      responses:
+        "202": { description: Accepted into the redaction/approval gate; ActorStamp recorded. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Caller lacks the promotion-approver role. }
+
+# Contract invariants (checked in CI by openapi-diff + integration tests):
+#  1. Every non-health endpoint requires oidcBearer (health/liveness/readiness stay unauthenticated).
+#  2. Role-restricted operations return 403 (not 200/500) for an authenticated-but-unauthorized caller.
+#  3. Every trust-sensitive decision response corresponds to a persisted audit record bearing ActorStamp.
