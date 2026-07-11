@@ -65,11 +65,61 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Independent Test**: In the studio create a draft of each of the eight types, author a rule via the DMN table editor and a prompt via the typed-slot editor, save, reopen, and confirm each draft is a persisted unpublished candidate that does not affect any running case.
 
-- [ ] T008 [US1] Implement `DraftController` — CRUD-as-draft per definition type (`POST /catalog/drafts`, `GET/PUT /catalog/drafts/{draftId}`; 409 on `(type,key,version)` conflict; 409 on edit while InReview) over `DraftService` in `studio/src/main/java/com/d2os/studio/DraftController.java` (FR-001, US1)
-- [ ] T009 [P] [US1] Implement typed-slot form models + server-side slot validation for the rubric and prompt editors (structured fields validated before save, not free-form blobs) in `studio/src/main/java/com/d2os/studio/editor/` (FR-003)
-- [ ] T010 [P] [US1] Implement the dmn-js editor bridge (serialize/deserialize authored DMN XML to the Rule draft body; server round-trips the table content) in `studio/src/main/java/com/d2os/studio/editor/DmnEditorBridge.java` (FR-002)
-- [ ] T011 [P] [US1] Author the Thymeleaf studio pages + htmx partials for the eight-type draft list and the per-type editors (embedding the dmn-js island for rules, typed-slot forms for rubric/prompt) in `studio/src/main/resources/templates/studio/` (research R1)
-- [ ] T012 [US1] Add `StudioAuthoringIT` in `app/src/test/java/com/d2os/app/StudioAuthoringIT.java`: create a draft of each of the 8 types (Rule via DMN XML, Prompt/Rubric via typed slots — slot validation rejects malformed slots), reload restores full content, drafts are not resolvable by any case (resolution filters `Published`), and MockMvc/HtmlUnit smoke on the Thymeleaf editor routes (SC-001)
+- [X] T008 [US1] Implement `DraftController` — CRUD-as-draft per definition type (`POST /catalog/drafts`, `GET/PUT /catalog/drafts/{draftId}`; 409 on `(type,key,version)` conflict; 409 on edit while InReview) over `DraftService` in `studio/src/main/java/com/d2os/studio/DraftController.java` (FR-001, US1).
+      Implemented at `/api/v1/catalog/drafts` (matching contracts/api.yaml's `/catalog/drafts` under
+      the `/api/v1` server prefix, same convention as `GateController`/`CatalogController`).
+      **Response-shape decision**: plain JSON (contracts/api.yaml's `DefinitionVersion` shape plus a
+      `body` field the schema omits but the "GET returns full draft content" description requires),
+      not HTML fragments — simpler, independently testable now; T011's pages consume it directly or
+      read the entity in-module. A later hardening pass can add an `Accept: text/html` branch that
+      renders an htmx fragment instead, without touching the service calls underneath. Also added
+      `GET/PUT /catalog/drafts/{draftId}/dmn-xml` (T010's bridge endpoints) on this same controller.
+      Added `DraftConflictException`/`DraftExceptionHandler` (409/400/404 mapping, same
+      `@RestControllerAdvice` convention as `GateExceptionHandler`/`CaseExceptionHandler`). Added a
+      handful of read-only getters to `DefinitionAsset` (workspaceId/locale/publishedAt/createdAt/
+      createdBy) so the response DTO could be built — no behavior change.
+- [X] T009 [P] [US1] Implement typed-slot form models + server-side slot validation for the rubric and prompt editors (structured fields validated before save, not free-form blobs) in `studio/src/main/java/com/d2os/studio/editor/` (FR-003).
+      `RubricEditorModel`/`RubricCriterionField` (personaKey + named/weighted/critical criteria,
+      weights must sum to 1.0) and `PromptEditorModel` (personaKey + template, `{{slot}}` placeholders
+      computed from the template, at least one required) — shapes verified against
+      `CatalogSeedLoader`'s real seeded bodies (`{"personaKey":...,"criteria":[{"name":...,"weight":
+      ...,"critical":...}]}` and `{"personaKey":...,"template":"..."}`) and the runtime readers
+      (`ValidationPipeline.readCriteria`, `ExecutionEnvelopeBuilder`'s `path("template")`), so an
+      authored draft is structurally compatible with existing scoring/rendering code. Wired into
+      `DraftController.create`/`update` (validated before persisting, 400 on violation) — not dead
+      code.
+- [X] T010 [P] [US1] Implement the dmn-js editor bridge (serialize/deserialize authored DMN XML to the Rule draft body; server round-trips the table content) in `studio/src/main/java/com/d2os/studio/editor/DmnEditorBridge.java` (FR-002).
+      **Honest scope note (matches T002's own flagged gap)**: this is the SERVER-SIDE half only — a
+      thin passthrough wrapping raw DMN XML as `{"dmnXml": "..."}` in the Draft body column (JSONB
+      can't hold raw XML) via `GET/PUT /catalog/drafts/{draftId}/dmn-xml`. It does no DMN parsing or
+      validation. It is a DIFFERENT shape from the legacy `{"decisionKey":...,"engine":"flowable-dmn"}`
+      pointer `CatalogSeedLoader` seeds for already-published rules (those point at a classpath
+      `*.dmn` resource, not embedded XML) — `fromBodyJson` returns `null` for that shape by design.
+      The actual visual dmn-js decision-table editor is CLIENT-side JS (T002) and is not vendored in
+      this sandbox (no outbound internet access) — `draft-edit.html`'s DMN container is an inert
+      placeholder until a network-enabled step drops the real dmn-js files in.
+- [X] T011 [P] [US1] Author the Thymeleaf studio pages + htmx partials for the eight-type draft list and the per-type editors (embedding the dmn-js island for rules, typed-slot forms for rubric/prompt) in `studio/src/main/resources/templates/studio/` (research R1).
+      `drafts.html` (list, filterable by type — links to each draft) and `draft-edit.html` (per-draft
+      editor: plain JSON-body textarea form for Draft-status rows via `StudioPageController`'s
+      `@Controller` POST adapter, a "frozen" message for InReview+ rows, and a DMN container for
+      `rule`-type drafts) — both reference the vendored asset paths (`/studio/vendor/htmx/htmx.min.js`,
+      `dmn-js/...`, `diff2html/...`). **Honest gap**: the actual vendored JS/CSS files are NOT present
+      (T002's own flagged sandbox limitation — no outbound internet access here) — the pages'
+      script/link tags point at paths that 404 today and will "just work" once a later, network-
+      enabled step drops the real files in. Deliberately kept to server-rendered plumbing (no live
+      htmx swap wiring, no client-side dmn-js mount) per this task's own "genuinely minimal" scope —
+      real interactivity is follow-up work once T002's assets exist.
+- [X] T012 [US1] Add `StudioAuthoringIT` in `app/src/test/java/com/d2os/app/StudioAuthoringIT.java`: create a draft of each of the 8 types (Rule via DMN XML, Prompt/Rubric via typed slots — slot validation rejects malformed slots), reload restores full content, drafts are not resolvable by any case (resolution filters `Published`), and MockMvc/HtmlUnit smoke on the Thymeleaf editor routes (SC-001).
+      Uses the same `TestRestTemplate`/`RANDOM_PORT` harness as `GateFlowIT`/`DeprecationIT` (not a
+      separate MockMvc/HtmlUnit fixture — the whole app context, including `studio`'s ViewResolver, is
+      already up) to smoke-test `/studio/drafts` and `/studio/drafts/{id}`. Covers all 8 types
+      draftable + reload-restores-content, malformed rubric/prompt slots rejected (400), drafts
+      invisible to `DefinitionResolutionService.latestPublished`, and update-succeeds-while-Draft.
+      **Scope note**: the InReview-rejection half (update after `markInReview()`, expect 409) is
+      explicitly NOT exercised — nothing in this phase calls `markInReview()`; that's T013's
+      submit-for-review endpoint (US2, not yet built). Left to `PublishGovernanceIT` (T019) once T013
+      lands, rather than fabricated here. **Cannot actually run in this environment** (no Docker,
+      same as every prior phase's IT) — hand-traced against the real code, not asserted to pass.
 
 **Checkpoint**: US1 independently testable — all eight types authorable as drafts with type-appropriate editors, none affecting a running case.
 

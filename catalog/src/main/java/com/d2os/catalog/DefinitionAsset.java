@@ -115,10 +115,15 @@ public class DefinitionAsset {
     }
 
     public UUID getId() { return id; }
+    public UUID getWorkspaceId() { return workspaceId; }
     public String getKey() { return key; }
     public String getVersion() { return version; }
     public String getType() { return type; }
     public String getStatus() { return status; }
+    public String getLocale() { return locale; }
     public String getBody() { return body; }
     public String getChecksum() { return checksum; }
+    public OffsetDateTime getPublishedAt() { return publishedAt; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
+    public String getCreatedBy() { return createdBy; }
 }
