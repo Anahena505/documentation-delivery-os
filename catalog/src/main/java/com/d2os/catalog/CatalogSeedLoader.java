@@ -91,6 +91,7 @@ public class CatalogSeedLoader implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         seedPhase1();
+        seedPhase1TemplatesAndPlaybooks();
         seedPhase2();
         seedPhase3();
     }
@@ -126,6 +127,257 @@ public class CatalogSeedLoader implements ApplicationRunner {
 
         seed("rule", "submission-classification", V1, """
                 {"decisionKey":"submissionClassification","engine":"flowable-dmn"}""");
+    }
+
+    /** One document template: a typed-slot skeleton, not filled content (§10 catalog shape). */
+    private record Template(String key, String title, String personaKey, String defines,
+                             String references, String vZeroSource, String content) {}
+
+    /**
+     * T065 (Phase 1 tracked debt, tasks.md Phase 9): the real catalog content T020 deferred — 9
+     * {@code TemplateDefinition}s (7 revised from the v0 audit's NEEDS_REVISION/ADOPTED sources +
+     * 2 greenfield GAPs the audit flagged Phase-1-mandatory: Task Breakdown, Handover Record) and 3
+     * {@code PlaybookDefinition}s, per spec.md's Assumptions ("templates are revised or authored ...
+     * rather than created wholesale") and the v0 audit (d2os-implementation-plan.md Appendix B).
+     *
+     * <p>Each template's {@code defines}/{@code references} match the corresponding Phase 2 SUITE
+     * persona's fields (line 42+) so a template is traceable to the artifact it skeletons even though
+     * Phase 1's own pipeline runs the frozen, generic {@code persona-1..3} (Principle I — those stay
+     * unmutated for old-case replay). Seeded as standalone published catalog content, NOT added to
+     * {@code case_type:initiation} v1's or v2's {@code dependsOn} — wiring templates into the
+     * mandatory pinned-snapshot dependency set (so generation actually renders against them) is a
+     * follow-up superseding neither pinned case-type version, tracked separately from this content
+     * -authoring pass.
+     */
+    private void seedPhase1TemplatesAndPlaybooks() {
+        List<Template> templates = List.of(
+                // --- 7 revised from v0 NEEDS_REVISION/ADOPTED sources (Appendix B) ----------------------
+                new Template("business-requirements-document", "Business Requirements Document",
+                        "business-analyst", "requirement:brd", "problem:scope",
+                        "requirements/prd.md + business/business-overview.md", """
+                        # Business Requirements Document
+
+                        ## 1. Problem Statement
+                        {{problemStatement}}
+
+                        ## 2. Business Objectives
+                        {{businessObjectives}}
+
+                        ## 3. Stakeholder Map
+                        | Stakeholder | Role | Interest |
+                        |---|---|---|
+                        {{stakeholderRows}}
+
+                        ## 4. Scope
+                        ### In Scope
+                        {{inScope}}
+                        ### Out of Scope
+                        {{outOfScope}}
+
+                        ## 5. Acceptance Criteria
+                        {{acceptanceCriteria}}
+
+                        ## 6. Assumptions & Constraints
+                        {{assumptionsConstraints}}"""),
+
+                new Template("functional-specification", "Functional Specification",
+                        "product-functional-analyst", "feature:catalog", "requirement:brd",
+                        "product/feature-specs/_template.md", """
+                        # Functional Specification
+
+                        ## 1. Source Requirements
+                        Derived from: {{sourceBrdReference}}
+
+                        ## 2. Feature Catalog
+                        {{featureList}}
+
+                        ## 3. Use Cases
+                        {{useCases}}
+
+                        ## 4. Functional Rules
+                        {{functionalRules}}
+
+                        ## 5. Non-Functional Notes
+                        (Cross-reference only — NFRs are owned elsewhere.)
+                        {{nfrNotes}}
+
+                        ## 6. Open Questions
+                        {{openQuestions}}"""),
+
+                new Template("solution-architecture-document", "Solution Architecture Document",
+                        "solution-architect", "component:architecture", "feature:catalog",
+                        "architecture/system-overview.md + domain-map.md", """
+                        # Solution Architecture Document
+
+                        ## 1. Architecture Overview
+                        {{architectureOverview}}
+
+                        ## 2. Component Map
+                        {{componentMap}}
+
+                        ## 3. Architecture Decision Records
+                        | ADR | Decision | Rationale | Status |
+                        |---|---|---|---|
+                        {{adrRows}}
+
+                        ## 4. Data Flow
+                        {{dataFlow}}
+
+                        ## 5. ERD Skeleton
+                        {{erdSkeleton}}
+
+                        ## 6. Non-Functional Drivers
+                        {{nonFunctionalDrivers}}"""),
+
+                new Template("api-specification", "API Specification",
+                        "api-designer", "endpoint:api", "component:architecture",
+                        "backend/api-contract.md (contract-first, native OpenAPI per Q7)", """
+                        # API Specification
+
+                        ## 1. Design Principles
+                        {{designPrinciples}}
+
+                        ## 2. Endpoint Catalog
+                        | Method | Path | Purpose | Auth |
+                        |---|---|---|---|
+                        {{endpointRows}}
+
+                        ## 3. Request / Response Schemas
+                        {{schemas}}
+
+                        ## 4. Error Model
+                        {{errorModel}}
+
+                        ## 5. Versioning & Backward Compatibility
+                        {{versioningPolicy}}"""),
+
+                new Template("threat-model", "Threat Model",
+                        "security-architect", "control:security", "component:architecture,endpoint:api",
+                        "security/threat-model.md + security/compliance-matrix.md, security/rbac-matrix.md", """
+                        # Threat Model (STRIDE)
+
+                        ## 1. Assets & Trust Boundaries
+                        {{assetsAndBoundaries}}
+
+                        ## 2. STRIDE Analysis
+                        | Component | Spoofing | Tampering | Repudiation | Info Disclosure | DoS | Elevation |
+                        |---|---|---|---|---|---|---|
+                        {{strideRows}}
+
+                        ## 3. Security Controls Matrix
+                        {{controlsMatrix}}
+
+                        ## 4. Residual Risk
+                        {{residualRisk}}"""),
+
+                new Template("test-plan", "Test Plan",
+                        "qa-test-strategist", "testcase:qa", "requirement:brd,endpoint:api",
+                        "testing/test-matrix.md + testing/core-domain-tests.md (pattern)", """
+                        # Test Plan
+
+                        ## 1. Test Strategy
+                        {{testStrategy}}
+
+                        ## 2. Scope & Coverage Targets
+                        {{scopeAndCoverage}}
+
+                        ## 3. Test Case Catalog
+                        | ID | Scenario | Requirement Ref | Priority |
+                        |---|---|---|---|
+                        {{testCaseRows}}
+
+                        ## 4. Entry / Exit Criteria
+                        {{entryExitCriteria}}
+
+                        ## 5. Environments & Data
+                        {{environmentsAndData}}"""),
+
+                new Template("risk-register", "Risk Register",
+                        "risk-governance-officer", "risk:governance", "requirement:brd,control:security",
+                        "processes/risk-register.md", """
+                        # Risk Register
+
+                        | ID | Risk | Likelihood | Impact | Owner | Mitigation | Status |
+                        |---|---|---|---|---|---|---|
+                        {{riskRows}}
+
+                        ## Escalation Policy
+                        {{escalationPolicy}}
+
+                        ## RACI (governance decisions)
+                        {{raci}}"""),
+
+                // --- 2 greenfield GAPs, Phase-1-mandatory (Appendix B) ------------------------------------
+                new Template("task-breakdown", "Task Breakdown",
+                        "delivery-planner", "task:delivery", "feature:catalog,testcase:qa",
+                        "GAP — authored greenfield, no v0 source", """
+                        # Task Breakdown (WBS → Action Items)
+
+                        ## 1. Work Breakdown Structure
+                        {{wbsTree}}
+
+                        ## 2. Action Items
+                        | ID | Task | Depends On | Owner Role | Estimate |
+                        |---|---|---|---|---|
+                        {{actionItemRows}}
+
+                        ## 3. Milestones
+                        {{milestones}}
+
+                        ## 4. Dependency Register
+                        {{dependencyRegister}}"""),
+
+                new Template("handover-record", "Handover Record",
+                        "technical-writer", "glossary:docs", "task:delivery",
+                        "GAP — authored greenfield, no v0 source; mirrors FR-008's six mandatory fields", """
+                        # Handover Record
+
+                        ## 1. Package Contents Index
+                        {{contentsIndex}}
+
+                        ## 2. Source Submission Reference
+                        {{submissionReference}}
+
+                        ## 3. Definition-Version Snapshot
+                        {{definitionVersionSnapshot}}
+
+                        ## 4. Per-Artifact Integrity Hashes
+                        {{integrityHashes}}
+
+                        ## 5. Decision / Approval Log
+                        {{decisionLog}}
+
+                        ## 6. Receiving Team & Next Action
+                        Owner: {{receivingTeamOwner}}
+                        Next action: {{nextAction}}""")
+        );
+
+        for (Template t : templates) {
+            seed("template", t.key(), V1, """
+                    {"title":"%s","personaKey":"%s","defines":"%s","references":"%s",\
+                    "v0Source":"%s","content":"%s"}"""
+                    .formatted(t.title(), t.personaKey(), t.defines(), t.references(),
+                            escape(t.vZeroSource()), escape(t.content())));
+        }
+
+        // 3 playbooks (E1.8): the operating procedure a persona follows to produce its artifact,
+        // spanning business/technical/delivery — paralleling the Phase 3 knowledge-curation playbook's
+        // {key,title,steps,policy} shape.
+        seed("playbook", "business-analysis", V1, """
+                {"key":"business-analysis","title":"Business Analysis Playbook",\
+                "personaKey":"business-analyst",\
+                "steps":["elicit-stakeholders","derive-objectives","draft-brd","validate-acceptance-criteria"],\
+                "policy":"non-goals: technical design; BRD must trace every requirement to a stated business objective"}""");
+        seed("playbook", "solution-architecture", V1, """
+                {"key":"solution-architecture","title":"Solution Architecture Playbook",\
+                "personaKey":"solution-architect",\
+                "steps":["review-functional-spec","draft-component-map","record-adrs","sketch-erd"],\
+                "policy":"non-goals: implementation code; every ADR must record rationale and status, never silently superseded"}""");
+        seed("playbook", "delivery-planning", V1, """
+                {"key":"delivery-planning","title":"Delivery Planning Playbook",\
+                "personaKey":"delivery-planner",\
+                "steps":["decompose-wbs","sequence-dependencies","estimate","set-milestones"],\
+                "policy":"non-goals: executing the work; every action item must declare its dependencies before estimation"}""");
     }
 
     // ---- Phase 2 v2.0.0 (the real documentation suite + canonical workflow) -----------------------
@@ -237,7 +489,11 @@ public class CatalogSeedLoader implements ApplicationRunner {
     }
 
     private String escape(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+        // Backslash/quote first (existing single-line callers), then newlines/carriage-returns/tabs —
+        // needed for multi-line content (T065's template bodies); a raw newline inside a JSON string
+        // literal is invalid JSON, so every embedded line break must become the two-character \n.
+        return s.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\r\n", "\\n").replace("\n", "\\n").replace("\t", "\\t");
     }
 
     private void seed(String type, String key, String version, String body) {

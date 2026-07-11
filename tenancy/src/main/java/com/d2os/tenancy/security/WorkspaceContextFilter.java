@@ -9,48 +9,98 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
  * Resolves the authenticated principal's workspace and binds it to {@link WorkspaceContext} for
- * the duration of the request (T010, Principle IV). {@link WorkspaceAwareDataSource} reads this
+ * the duration of the request (T010/T067, Principle IV). {@link WorkspaceAwareDataSource} reads this
  * binding and stamps it onto every JDBC connection at checkout — this filter does NOT itself touch
  * the database (an earlier version issued {@code SET app.workspace_id} via a one-off JdbcTemplate
  * call, which landed on whatever connection the pool happened to lend it, not necessarily the one
  * the request's actual transaction later used — a real RLS-bypass bug, found via the integration
  * test).
  *
- * <p>v1 reads the workspace from the {@code X-Workspace-Id} header (set by the authenticated
- * gateway/session layer upstream); replacing this with a JWT-claim lookup is a drop-in swap once
- * full authN is wired in a later phase.
+ * <p><b>Primary path (T067):</b> an {@code Authorization: Bearer <jwt>} header, cryptographically
+ * verified by {@link JwtService} — signature, issuer, and expiry all checked — with the workspace
+ * resolved from the token's {@code workspace_id} claim, never from anything client-asserted.
+ *
+ * <p><b>Fallback path (v1 stopgap, T010):</b> an unauthenticated {@code X-Workspace-Id} header.
+ * This is accepted ONLY when {@link JwtProperties#allowHeaderWorkspaceFallback()} is {@code true} —
+ * which defaults to {@code false} and is enabled solely in
+ * {@code app/src/test/resources/application.properties}, so production genuinely requires a valid
+ * JWT (the header path is provably unreachable unless explicitly opted into) while every existing
+ * integration test — authored before JWT support existed, and asserting business logic, not auth —
+ * keeps passing unchanged.
  */
 @Component
 public class WorkspaceContextFilter extends OncePerRequestFilter {
 
-    private static final String HEADER = "X-Workspace-Id";
+    private static final String WORKSPACE_HEADER = "X-Workspace-Id";
+    private static final String AUTH_HEADER = "Authorization";
+    private static final String BEARER_PREFIX = "Bearer ";
+
+    private final JwtService jwtService;
+    private final JwtProperties jwtProperties;
+
+    public WorkspaceContextFilter(JwtService jwtService, JwtProperties jwtProperties) {
+        this.jwtService = jwtService;
+        this.jwtProperties = jwtProperties;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        String header = request.getHeader(HEADER);
-        if (header == null || header.isBlank()) {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Missing " + HEADER);
-            return;
+        Optional<UUID> workspaceId = resolveFromBearerToken(request);
+
+        if (workspaceId.isEmpty()) {
+            String authHeader = request.getHeader(AUTH_HEADER);
+            if (authHeader != null && authHeader.startsWith(BEARER_PREFIX)) {
+                // A Bearer token WAS presented but failed verification — never silently fall through
+                // to the header path for a request that attempted (and failed) real authentication.
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid or expired bearer token");
+                return;
+            }
+            workspaceId = resolveFromHeaderFallback(request, response);
+            if (workspaceId == null) {
+                return; // fallback helper already wrote the error response
+            }
         }
 
-        UUID workspaceId;
         try {
-            workspaceId = UUID.fromString(header);
-        } catch (IllegalArgumentException e) {
-            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid " + HEADER);
-            return;
-        }
-
-        try {
-            WorkspaceContext.set(workspaceId);
+            WorkspaceContext.set(workspaceId.get());
             chain.doFilter(request, response);
         } finally {
             WorkspaceContext.clear();
+        }
+    }
+
+    private Optional<UUID> resolveFromBearerToken(HttpServletRequest request) {
+        String authHeader = request.getHeader(AUTH_HEADER);
+        if (authHeader == null || !authHeader.startsWith(BEARER_PREFIX)) {
+            return Optional.empty();
+        }
+        return jwtService.validateAndExtractWorkspace(authHeader.substring(BEARER_PREFIX.length()));
+    }
+
+    /** Returns the resolved workspace, or null if it already wrote an error response (caller must return). */
+    private Optional<UUID> resolveFromHeaderFallback(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        if (!jwtProperties.allowHeaderWorkspaceFallback()) {
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED,
+                    "Missing Authorization bearer token (unauthenticated X-Workspace-Id fallback is disabled)");
+            return null;
+        }
+        String header = request.getHeader(WORKSPACE_HEADER);
+        if (header == null || header.isBlank()) {
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Missing " + WORKSPACE_HEADER);
+            return null;
+        }
+        try {
+            return Optional.of(UUID.fromString(header));
+        } catch (IllegalArgumentException e) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid " + WORKSPACE_HEADER);
+            return null;
         }
     }
 }
