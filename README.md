@@ -1,127 +1,203 @@
-# D2OS — Documentation & Delivery Operating System
+<div align="center">
 
-D2OS compiles auditable, reproducible execution plans for documentation and delivery work. Every
-executable concept (Workflow, Persona, Playbook, Template, Operation, Rule) exists as an immutable,
-semantic-versioned **Definition**, separate from its runtime **Instance**; a running Case pins to the
-exact Definition versions frozen into its snapshot and is fully reconstructable from recorded data,
-never from "whatever the Definition currently says." AI participates as a bounded, reproducible drafter
-gated by an accountable human decision — it never crosses a stage boundary unvalidated. It is a
-modular monolith: one Spring Boot application composed of one Gradle module per bounded context.
+# 🧭 D2OS — Documentation & Delivery Operating System
 
-## Constitutional principles
+### Compile **auditable, reproducible** delivery plans — where AI drafts, rules route, and humans decide.
 
-The design is governed by five principles (see [`.specify/memory/constitution.md`](.specify/memory/constitution.md)):
+*A modular-monolith reference architecture for regulated, compliance-sensitive knowledge work: every artifact is reconstructable from recorded inputs, every decision is tamper-evident, and the AI never crosses a stage boundary unvalidated.*
 
-1. **Definition/Instance Immutability** — Definitions are versioned and never mutated in place; running
-   Cases pin their Definition versions and do not auto-upgrade.
-2. **Reproducible, Bounded AI Participation** *(non-negotiable)* — every AI execution snapshots its
-   prompt, model identity, and injected Knowledge; AI is bounded by the D1–D4 decision-authority ladder;
-   problem text is always data, never instructions.
-3. **System of Record Integrity** — the relational database is the single source of truth; any graph is
-   a derived, rebuildable CQRS projection reconstructable from relational data alone.
-4. **Workspace Isolation & Provenance-Preserving Evolution** — a workspace is a hard tenant boundary;
-   library content arrives by copy-on-subscribe carrying provenance.
-5. **Default-Deny Security & Auditable Governance Gates** — cross-boundary movement is default-deny;
-   every gate decision produces a tamper-evident (hash-chained) audit record of who/when/under what/why.
+[![CI](https://github.com/Anahena505/documentation-delivery-os/actions/workflows/ci.yml/badge.svg)](https://github.com/Anahena505/documentation-delivery-os/actions/workflows/ci.yml)
+![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3-6DB33F?logo=springboot&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20+%20pgvector-4169E1?logo=postgresql&logoColor=white)
+![Architecture](https://img.shields.io/badge/architecture-modular%20monolith-blueviolet)
+![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
-## Module map (15 Gradle modules)
+[Why](#-why-d2os) · [Features](#-what-makes-it-different) · [Architecture](#%EF%B8%8F-architecture) · [Quickstart](#-quickstart) · [How it works](#-how-it-works) · [Testing](#-verification--why-you-can-trust-the-build) · [Roadmap](#-roadmap)
 
-Defined in [`settings.gradle`](settings.gradle):
+</div>
+
+---
+
+## 💡 Why D2OS
+
+Most "AI writes your docs" systems are a black box: a prompt goes in, prose comes out, and six months later nobody can answer *why* an artifact says what it says, *which* model and knowledge produced it, or *who* approved it. That's a non-starter for regulated work — audits, DPIAs, compliance packages, anything with a paper trail.
+
+**D2OS treats a delivery pipeline like a compiler, not a chatbot.** It compiles an *execution plan* from immutable, versioned Definitions; runs it with AI as a **bounded, reproducible drafter**; gates every trust-sensitive transition behind an accountable human decision; and records the whole thing so any delivered Case can be **replayed byte-for-byte** from data alone.
+
+> If you've ever had to explain an AI-generated document to an auditor, D2OS is the architecture you wished you'd started with.
+
+---
+
+## ✨ What makes it different
+
+| | |
+|---|---|
+| 🔒 **Reproducible by construction** | Every AI execution snapshots its prompt, model identity, and injected knowledge. Delivered Cases replay **byte-identical** from recorded inputs — not "close enough," identical. |
+| 🧊 **Immutable Definitions, pinned Instances** | Workflows, Personas, Templates, Rules are semver Definitions that are *never* mutated in place. A running Case pins the exact versions it started with and can't silently drift. |
+| 🧾 **Tamper-evident governance** | Every gate approval / rejection / reopen writes a **hash-chained** audit record (who, when, under what info, why). Alter one field and the seal breaks — provably. |
+| 🕸️ **Graph as a rebuildable projection** | Traceability, dependency-cycle detection, and influence analytics run on a CQRS graph read-model that is *always* reconstructable from the relational source of truth — never a second source of truth. |
+| 🧱 **Boundaries enforced by the build** | 15 bounded contexts in one deployable app; module boundaries are **mechanically enforced by ArchUnit** — a leak fails CI like any other test. |
+| 🛡️ **Default-deny, multi-tenant** | Hard workspace isolation via Postgres Row-Level Security *and* a workspace-scoped token. Opt-in OIDC adds per-user identity + RBAC. Secrets are fail-loud (no silent defaults). |
+| 📈 **Production-shaped** | Prometheus metrics, OpenTelemetry tracing, JSON logs, once-per-cycle scheduled jobs across instances (ShedLock), health probes, a Helm chart, and a rehearsed disaster-recovery runbook. |
+| 🤖 **Provider-agnostic AI** | One AI Gateway is the *only* call site to a model — with a workspace-scope guard and per-workspace rate limiter. Swap providers without touching a persona. |
+
+---
+
+## 🏗️ Architecture
+
+One Spring Boot application, one Gradle module per bounded context. The relational DB is the single system of record; the graph is a derived projection.
+
+```mermaid
+flowchart TB
+    subgraph Edge["HTTP · workspace-scoped (JWT/OIDC) + RLS"]
+        API["80 REST endpoints"]
+        UI["Catalog Studio<br/>(Thymeleaf + htmx)"]
+    end
+
+    subgraph Core["Bounded contexts (modular monolith)"]
+        intake["intake"] --> casecore["casecore<br/>lifecycle + audit hash-chain"]
+        catalog["catalog<br/>immutable Definitions"] --> casecore
+        casecore --> orch["orchestration<br/>embedded BPMN/DMN engine"]
+        orch --> persona["persona<br/>stateless AI + AI Gateway"]
+        persona --> artifacts["artifacts<br/>rendered from Templates"]
+        casecore --> governance["governance<br/>gates · reopen · escalation"]
+        persona -. reads .-> knowledge["knowledge<br/>governed retrieval"]
+    end
+
+    subgraph Read["Derived / rebuildable"]
+        projection["projection<br/>graph_node / graph_edge<br/>(sole writer)"]
+        replay["replay<br/>byte-identical harness"]
+    end
+
+    Edge --> Core
+    Core -->|"event outbox"| projection
+    Core --> replay
+    Core --> DB[("PostgreSQL 16<br/>+ pgvector · RLS · WAL archive")]
+    persona --> Gateway(["AI Gateway<br/>(provider-agnostic)"])
+    artifacts --> Store[("Object store<br/>S3 / MinIO")]
+    projection --> DB
+```
+
+**The core invariant** — a running Case never reads "whatever the Definition says now":
+
+```mermaid
+sequenceDiagram
+    participant U as Submitter
+    participant C as Case
+    participant Cat as Catalog (immutable, versioned)
+    participant AI as Persona (via Gateway)
+    participant G as Governance gate
+    U->>C: submit problem (data, never instructions)
+    C->>Cat: freeze exact Definition versions → snapshot
+    C->>AI: run with pinned prompt + model + knowledge
+    AI-->>C: draft (D3) — snapshotted, reproducible
+    C->>G: no D3 output crosses a stage unvalidated
+    G-->>C: human/rule decision → hash-chained audit record
+    Note over C: Delivered Case replays byte-identical from records
+```
+
+---
+
+## 🚀 Quickstart
+
+**Prerequisites:** JDK 21 · Docker (backing services + integration tests).
+
+```bash
+# 1. Configure — secrets are fail-loud; the app refuses to start if one is unset
+cp .env.example .env        # set D2OS_DB_*_PASSWORD, D2OS_STORAGE_SECRET_KEY, D2OS_JWT_SECRET…
+
+# 2. Start Postgres (pgvector + WAL archiving) and MinIO
+docker compose up -d        # reads .env automatically
+
+# 3. Run — Flyway applies the schema on boot
+./gradlew :app:bootRun      # health: /actuator/health/{liveness,readiness}
+```
+
+Build the container image (Cloud Native Buildpacks — no hand-written Dockerfile):
+
+```bash
+./gradlew :app:bootBuildImage      # → d2os/app:<version>
+```
+
+Deploy: a starter **Helm chart** lives in [`deploy/helm/`](deploy/helm) (probes, config/secret split), with Prometheus alert rules and a Grafana dashboard under [`deploy/`](deploy).
+
+> Some sandboxes can't download the Gradle wrapper distribution — use the system Gradle at `/opt/gradle/bin/gradle`. See [`CLAUDE.md`](CLAUDE.md).
+
+---
+
+## 🧩 How it works
+
+**Spec-driven.** The whole system is built from versioned specifications ([`specs/`](specs)) under a five-principle [constitution](.specify/memory/constitution.md):
+
+1. **Definition/Instance Immutability** — versioned Definitions, pinned running Instances, no in-place mutation.
+2. **Reproducible, Bounded AI Participation** *(non-negotiable)* — snapshot prompt + model + knowledge per execution; the D1–D4 ladder (AI drafts → rules route → humans decide); problem text is always data, never instructions.
+3. **System of Record Integrity** — relational DB is truth; the graph is a rebuildable projection.
+4. **Workspace Isolation & Provenance** — hard tenant boundary; library content arrives by copy-on-subscribe carrying provenance.
+5. **Default-Deny Security & Auditable Gates** — cross-boundary movement is blocked until it clears a gate; every decision is hash-chained.
+
+### The 15 modules
 
 | Module | Role |
 |---|---|
-| `app` | Spring Boot entrypoint; depends on all bounded contexts; owns app-wide config, migrations runner, scheduling |
-| `catalog` | Definition catalog — immutable, semver Definitions (Operations, Templates, Playbooks) and seeding |
-| `tenancy` | Workspace tenant isolation, security (JWT/OIDC workspace scoping), RLS role wiring |
-| `intake` | Problem submission and Case creation |
-| `casecore` | Case lifecycle, progress, and the tamper-evident audit hash-chain (seal/verify) |
-| `orchestration` | Workflow execution over the embedded engine; reconciliation; delivered-knowledge triggers |
-| `persona` | Stateless AI personas + the provider-agnostic AI Gateway (scope guard, token budget) |
-| `artifacts` | Artifact content + revisions, rendered from Template Definitions with version provenance |
-| `observability` | Metrics (Micrometer), KPI emission, operational instrumentation |
-| `replay` | Byte-identical replay/reproducibility harness for delivered Cases |
-| `knowledge` | Governed KnowledgeItem lifecycle + retrieval (OHS) |
-| `governance` | Review/approval gates, reopen policy, escalation, retention/access governance |
-| `studio` | Catalog Studio — presentation-only server-rendered UI (Thymeleaf + htmx); holds no catalog semantics |
-| `projection` | Derived, rebuildable graph read model (`graph_node`/`graph_edge`); sole writer via the `d2os_projector` DB role |
-| `test-support` | Shared Testcontainers fixtures and ArchUnit boundary rules |
+| `app` | Spring Boot entrypoint; wires all contexts, scheduling, migrations |
+| `catalog` | Immutable, semver Definitions (Operations, Templates, Playbooks) |
+| `tenancy` | Workspace isolation, JWT/opt-in-OIDC scoping, RLS role wiring |
+| `intake` | Problem submission → Case creation |
+| `casecore` | Case lifecycle, progress, tamper-evident audit hash-chain |
+| `orchestration` | Execution over the embedded BPMN/DMN engine; reconciliation |
+| `persona` | Stateless AI personas + provider-agnostic AI Gateway |
+| `artifacts` | Artifact revisions rendered from Template Definitions (with provenance) |
+| `observability` | Micrometer metrics, KPI emission, job instrumentation |
+| `replay` | Byte-identical replay/reproducibility harness |
+| `knowledge` | Governed KnowledgeItem lifecycle + retrieval |
+| `governance` | Review/approval gates, reopen policy, escalation, retention |
+| `studio` | Catalog Studio UI (presentation-only; holds no catalog semantics) |
+| `projection` | Rebuildable graph read-model; **sole writer** of the graph tables |
+| `test-support` | Testcontainers fixtures + the ArchUnit boundary rules |
 
-Module boundaries are mechanically enforced by ArchUnit rules in `test-support`.
+---
 
-## Quickstart
+## ✅ Verification — why you can trust the build
 
-Prerequisites: JDK 21, Docker (for the Postgres/MinIO backing services and for the Testcontainers
-integration tests).
+D2OS runs an honest test **pyramid**, not a pile of hopeful mocks:
 
-1. **Configure environment** — copy the example env file and set real local values:
+- **Fast unit tests** — plain JUnit 5, no Spring, no Docker. Pure logic: cycle detection, audit canonicalization (incl. tamper-sensitivity), escalation resolution, token budgets, scope guards. Sub-second.
+- **Testcontainers integration suites** (`*IT`) — real Postgres + MinIO per run. RLS isolation, gate escalation, audit hash-chaining, graph equivalence, copy-on-subscribe, RBAC + actor-stamped audit. **Fail-closed**: no Docker → they error, they never skip.
+- **ArchUnit boundary rules** — module boundaries are tested like code (`./gradlew :app:test --tests ArchitectureRulesTest`).
+- **`@Tag("slow")` benchmarks** — traceability p95, pin-resolution at scale — run nightly.
 
-   ```bash
-   cp .env.example .env
-   # edit .env: set D2OS_DB_*_PASSWORD, D2OS_STORAGE_SECRET_KEY, D2OS_JWT_SECRET, etc.
-   ```
+```bash
+./gradlew build      # unit + integration + ArchUnit, on every PR via .github/workflows/ci.yml
+```
 
-   The full env-var surface is documented in [`.env.example`](.env.example). Secrets are fail-loud
-   (no silent defaults) — the app refuses to start when a required secret is unset.
+CI runs the full suite on every push/PR; a nightly job runs the benchmarks. Coverage (JaCoCo), formatting (Spotless / google-java-format), and static analysis (SpotBugs) are wired in.
 
-2. **Start the backing services** — Postgres (pgvector, with WAL archiving) and MinIO:
+---
 
-   ```bash
-   docker compose up -d          # reads .env automatically
-   ```
+## 🗺️ Roadmap
 
-3. **Run the app** — export the `.env` values into the shell (or use direnv), then:
+Delivered specs live in [`specs/`](specs) (catalog + initiation, full persona parallelism, knowledge layer, assessment/enhancement case types, governance gates, catalog studio, graph projection + analytics, production readiness). The forward-looking hardening plan is in [`docs/enhancement-plan.md`](docs/enhancement-plan.md) — CI/verification, observability, multi-instance safety, OIDC + RBAC, deployable image, and real template→artifact content are already landed; next up: contract-conformance in CI, performance baselines, and DR at production scale.
 
-   ```bash
-   ./gradlew :app:bootRun
-   ```
+---
 
-   Flyway applies the schema on startup. Health probes are at `/actuator/health/liveness` and
-   `/actuator/health/readiness`.
+## 🤝 Contributing
 
-   The **application container image** is produced by Spring Boot's buildpack task, not a hand-written
-   Dockerfile:
+Contributions are welcome. The conventions the codebase already follows — system Gradle, the single global Flyway version namespace, additive-within-module boundaries, the SPI dependency-inversion pattern — are captured in [`CLAUDE.md`](CLAUDE.md). Every change is gated by CI (build + tests + ArchUnit). Start from a feature spec in [`specs/`](specs) and keep the module boundaries clean — the build will tell you if you don't.
 
-   ```bash
-   ./gradlew :app:bootBuildImage      # builds d2os/app:<version>
-   ```
+## 📚 Learn more
 
-## Test tiers
+- 🏛️ **Design & phased delivery:** [`docs/d2os-implementation-plan.md`](docs/d2os-implementation-plan.md)
+- 🧭 **Governing principles:** [`.specify/memory/constitution.md`](.specify/memory/constitution.md)
+- 🔧 **Operations:** DR runbook [`ops/dr-drill.md`](ops/dr-drill.md) · rehearsal [`ops/dr-rehearsal.sh`](ops/dr-rehearsal.sh) · backup verification [`ops/backup-verification.md`](ops/backup-verification.md)
+- 📐 **Specs, plans, contracts:** [`specs/`](specs)
 
-D2OS has a three-tier test pyramid:
+## 📄 License
 
-- **Fast JUnit unit tests** (`*Test`) — plain JUnit 5, no Spring, no Docker. Pure domain logic (cycle
-  detection, audit canonicalization, escalation resolution, token budgets, scope guards). Run in seconds:
+No license file is committed yet — until one is added, all rights are reserved by the repository owner. If you intend this to be open source (recommended for the goal above), add a `LICENSE` (e.g. Apache-2.0 or MIT) and this section will point to it.
 
-  ```bash
-  ./gradlew test        # unit tests + IT; the unit classes need no infra
-  ```
+<div align="center">
 
-- **Testcontainers integration suites** (`*IT`) — real Postgres + MinIO started per run; cover RLS
-  isolation, gate escalation, audit hash-chaining, graph equivalence, copy-on-subscribe. **These
-  require a running Docker daemon** and run in CI on every push/PR (`.github/workflows/ci.yml`). They
-  fail closed: without Docker they error, they do not skip.
+**If this architecture is useful to you, a ⭐ helps others find it.**
 
-- **`@Tag("slow")` benchmarks** — long-running performance ITs (traceability query p95, pin
-  resolution) excluded from the ordinary `test` task and run nightly
-  (`.github/workflows/nightly.yml`):
-
-  ```bash
-  ./gradlew :app:slowTest
-  ```
-
-> Note: in some environments the `./gradlew` wrapper cannot download its distribution; use the system
-> Gradle at `/opt/gradle/bin/gradle` instead (see [`CLAUDE.md`](CLAUDE.md)).
-
-## Operations
-
-- Disaster recovery: [`ops/dr-drill.md`](ops/dr-drill.md) (runbook), [`ops/dr-rehearsal.sh`](ops/dr-rehearsal.sh)
-  (full-shape rehearsal against the real schema).
-- Backup verification: [`ops/backup-verification.md`](ops/backup-verification.md) +
-  [`ops/backup-verify.sh`](ops/backup-verify.sh) (scheduled restore + audit-chain integrity check).
-
-## Where to look next
-
-- Architecture & phased delivery: [`docs/d2os-implementation-plan.md`](docs/d2os-implementation-plan.md).
-- Forward-looking hardening roadmap: [`docs/enhancement-plan.md`](docs/enhancement-plan.md).
-- Feature specs, plans, and contracts: [`specs/`](specs/).
-- Contributor/agent conventions: [`CLAUDE.md`](CLAUDE.md).
+</div>
