@@ -33,7 +33,7 @@ These make every task below self-contained so it can be done without extra inves
 
 **Purpose**: fix the build so tests can run and quality is measured. No behavior change.
 
-- [ ] T001 In `build.gradle` (root, `subprojects { dependencies { … } }` block, lines ~44-49), replace
+- [X] T001 In `build.gradle` (root, `subprojects { dependencies { … } }` block, lines ~44-49), replace
   the three per-artifact Testcontainers declarations (`org.testcontainers:junit-jupiter:1.20.3`,
   `:postgresql:1.20.3`, `:minio:1.20.3`) with a BOM import
   `testImplementation platform('org.testcontainers:testcontainers-bom:1.20.3')` plus versionless
@@ -41,18 +41,18 @@ These make every task below self-contained so it can be done without extra inves
   `test-support/build.gradle` (lines 4-6), using `api platform(...)` + versionless `api` entries.
   Acceptance: `/opt/gradle/bin/gradle :app:dependencies --configuration testRuntimeClasspath` shows
   `org.testcontainers:testcontainers:1.20.3` (NOT `-> 1.19.8`).
-- [ ] T002 [P] In `build.gradle` root `subprojects` block, apply `id 'jacoco'` and add a
+- [X] T002 [P] In `build.gradle` root `subprojects` block, apply `id 'jacoco'` and add a
   `jacocoTestReport` task that depends on `test`. Acceptance: `/opt/gradle/bin/gradle :casecore:jacocoTestReport`
   produces `casecore/build/reports/jacoco/test/html/index.html`.
-- [ ] T003 [P] In `build.gradle` root, apply the Spotless plugin
+- [X] T003 [P] In `build.gradle` root, apply the Spotless plugin
   (`id 'com.diffplug.spotless' version '6.25.0'` in the root `plugins { … apply false }`, then
   `apply plugin: 'com.diffplug.spotless'` in `subprojects`) configured with
   `java { googleJavaFormat() }`. Acceptance: `/opt/gradle/bin/gradle spotlessCheck` runs (may report
   violations — that is fine for this task).
-- [ ] T004 [P] In `build.gradle` root, apply SpotBugs (`id 'com.github.spotbugs' version '6.0.26'`) in
+- [X] T004 [P] In `build.gradle` root, apply SpotBugs (`id 'com.github.spotbugs' version '6.0.26'`) in
   `subprojects` with `spotbugs { effort = 'default'; reportLevel = 'high' }`. Acceptance:
   `/opt/gradle/bin/gradle :casecore:spotbugsMain` runs.
-- [ ] T005 Run `/opt/gradle/bin/gradle compileJava compileTestJava -q --rerun` and confirm all 15
+- [X] T005 Run `/opt/gradle/bin/gradle compileJava compileTestJava -q --rerun` and confirm all 15
   modules still compile after the build changes above.
 
 **Checkpoint**: build resolves aligned Testcontainers and has coverage/format/bug plugins wired.
