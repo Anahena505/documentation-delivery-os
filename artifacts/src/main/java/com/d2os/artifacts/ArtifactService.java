@@ -7,8 +7,10 @@ import com.d2os.casecore.AuditWriter;
 import com.d2os.casecore.CaseDefinitionSnapshot;
 import com.d2os.casecore.CaseDefinitionSnapshotRepository;
 import com.d2os.casecore.CaseTypeCapability;
+import com.d2os.casecore.spi.ArtifactRevisionListener;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +49,7 @@ public class ArtifactService {
     private final AuditEntryRepository auditEntryRepository;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final ObjectProvider<ArtifactRevisionListener> revisionListener;
 
     public ArtifactService(ArtifactRepository artifactRepository,
                            ArtifactRevisionRepository revisionRepository,
@@ -55,7 +58,8 @@ public class ArtifactService {
                            AuditWriter auditWriter,
                            AuditEntryRepository auditEntryRepository,
                            ObjectMapper objectMapper,
-                           JdbcTemplate jdbcTemplate) {
+                           JdbcTemplate jdbcTemplate,
+                           ObjectProvider<ArtifactRevisionListener> revisionListener) {
         this.artifactRepository = artifactRepository;
         this.revisionRepository = revisionRepository;
         this.personaOutputPort = personaOutputPort;
@@ -64,6 +68,7 @@ public class ArtifactService {
         this.auditEntryRepository = auditEntryRepository;
         this.objectMapper = objectMapper;
         this.jdbcTemplate = jdbcTemplate;
+        this.revisionListener = revisionListener;
     }
 
     @Transactional
@@ -147,6 +152,12 @@ public class ArtifactService {
                     output.storageRef(), output.contentHash(), output.operationExecutionId());
             ArtifactRevision saved = revisionRepository.save(revision);
             linkToBaseline(workspaceId, saved.getId(), baselineRevisionIds);
+            // Phase 5 US3 (T025): the revision that was just SUPERSEDED (`latest`, before this append)
+            // is the one existing trace_link edges point to (DERIVES_FROM/SATISFIES `to_id` is set at
+            // the DEPENDENT's creation time, so it always names whichever revision was current then) —
+            // governance (if present) looks up dependents of THAT id, not the brand-new one nothing yet
+            // depends on. Best-effort/optional, same posture as GateService's EngineGateReleasePort.
+            latest.ifPresent(prior -> revisionListener.ifAvailable(l -> l.onNewRevision(workspaceId, prior.getId())));
             return Optional.of(saved);
         }
 

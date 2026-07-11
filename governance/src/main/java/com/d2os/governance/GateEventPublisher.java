@@ -72,6 +72,51 @@ public class GateEventPublisher {
                 "system:engine", payload);
     }
 
+    /**
+     * {@code GATE_REOPEN_CANDIDATE} (T029, US3, research R8, FR-019) — emitted by {@code
+     * ReopenCandidateService} the moment a direct dependent's already-APPROVED gate flips to {@code
+     * REOPEN_CANDIDATE}; carries the candidate row's depth and upstream/dependent revision ids.
+     */
+    @Transactional
+    public void publishReopenCandidate(GateInstance gate, com.d2os.governance.reopen.GateReopenCandidate candidate) {
+        Map<String, Object> payload = basePayload("GATE_REOPEN_CANDIDATE", gate);
+        payload.put("candidateId", candidate.getId().toString());
+        payload.put("upstreamArtifactRevisionId", candidate.getUpstreamArtifactRevisionId().toString());
+        payload.put("dependentArtifactRevisionId", candidate.getDependentArtifactRevisionId().toString());
+        payload.put("depth", candidate.getDepth());
+        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_REOPEN_CANDIDATE",
+                "system:reopen-candidate-service", payload);
+    }
+
+    /** {@code GATE_IMPACT_ASSESSED} (T029, US3, research R8, FR-019) — an ImpactAssessment was recorded. */
+    @Transactional
+    public void publishImpactAssessed(GateInstance gate, UUID impactAssessmentId, String author) {
+        Map<String, Object> payload = basePayload("GATE_IMPACT_ASSESSED", gate);
+        payload.put("impactAssessmentId", impactAssessmentId.toString());
+        payload.put("author", author);
+        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_IMPACT_ASSESSED",
+                author, payload);
+    }
+
+    /** {@code GATE_REOPENED} (T029, US3, research R8, FR-019) — REOPEN_CANDIDATE -> REOPENED. */
+    @Transactional
+    public void publishReopened(GateInstance gate, String actorId) {
+        Map<String, Object> payload = basePayload("GATE_REOPENED", gate);
+        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_REOPENED",
+                actorId, payload);
+    }
+
+    /** {@code GATE_ESCALATION_FIRED} (T036, US4, research R8/R4, FR-019) — an advisory SLA timer fired. */
+    @Transactional
+    public void publishEscalationFired(GateInstance gate, String policyKey, int policyVersion, int stepIndex) {
+        Map<String, Object> payload = basePayload("GATE_ESCALATION_FIRED", gate);
+        payload.put("policyKey", policyKey);
+        payload.put("policyVersion", policyVersion);
+        payload.put("stepIndex", stepIndex);
+        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_ESCALATION_FIRED",
+                "system:timer", payload);
+    }
+
     /** The projection-sufficient tuple every {@code GateEventPayload} shares (contracts/api.yaml). */
     private Map<String, Object> basePayload(String eventType, GateInstance gate) {
         Map<String, Object> payload = new LinkedHashMap<>();
