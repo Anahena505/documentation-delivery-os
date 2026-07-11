@@ -23,6 +23,12 @@ import java.util.stream.Stream;
  * case_type, every new Case now runs the full suite via the {@code initiation-v2} process; v1 stays
  * available only for replay. Persona prose here is intentionally concise but real (charter, competency,
  * operation binding) — full catalog-studio authoring is a later phase, not this loader's job.
+ *
+ * <p><b>Phase 4 (v4.0.0, scaffold only — T003)</b> reserves the seed pass for the Assessment and
+ * Enhancement case types (research R1). This pass is intentionally empty at T003: the actual
+ * {@code case_type.assessment} / {@code case_type.enhancement} definitions and their
+ * Workflow/Rule/Template/Rubric dependencies are authored by the later user-story tasks
+ * (T009/T015/T016/T021/T022/T031) once the BPMN/DMN resources they reference exist.
  */
 @Component
 public class CatalogSeedLoader implements ApplicationRunner {
@@ -31,6 +37,7 @@ public class CatalogSeedLoader implements ApplicationRunner {
     private static final String V1 = "1.0.0";
     private static final String V2 = "2.0.0";
     private static final String V3 = "3.0.0";
+    private static final String V4 = "4.0.0";
 
     /** One documentation persona of the Phase 2 suite (T011). */
     private record Persona(String key, String title, String charter, String artifact,
@@ -93,6 +100,7 @@ public class CatalogSeedLoader implements ApplicationRunner {
         seedPhase1();
         seedPhase2();
         seedPhase3();
+        seedPhase4();
     }
 
     // ---- Phase 1 v1.0.0 (kept published for replay of Phase 1 cases; Principle I) ------------------
@@ -234,6 +242,20 @@ public class CatalogSeedLoader implements ApplicationRunner {
                 {"key":"knowledge-curation","title":"Knowledge Curation Playbook",\
                 "steps":["prefilter","curator-redaction","d4-review"],\
                 "policy":"default-deny; fixed gate order PREFILTER→CURATION→D4; D4 non-self-satisfiable"}""");
+    }
+
+    // ---- Phase 4 v4.0.0 (Assessment + Enhancement case types — scaffold only, T003) -----------------
+
+    /**
+     * Reserved for the Phase 4 Assessment/Enhancement seed set (data-model.md "New Catalog Content"):
+     * {@code case_type.assessment}, {@code case_type.enhancement}, their {@code workflow.assessment} /
+     * {@code workflow.enhancement} bindings, {@code rule.case-type-classification},
+     * {@code rule.conditional-artifacts}, the new Template/Rubric/Prompt definitions, and any
+     * dependent personas. Left empty by design until the BPMN/DMN resources those definitions bind to
+     * are authored (T008/T014/T020/T030) — filled in by T009/T015/T016/T021/T022/T031.
+     */
+    private void seedPhase4() {
+        // Intentionally empty (T003 scaffold). Phase 3/4 user-story tasks add seed() calls here.
     }
 
     private String escape(String s) {
