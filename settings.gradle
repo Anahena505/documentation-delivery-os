@@ -18,6 +18,10 @@ include 'knowledge'
 // Governance bounded context (Phase 5, BC-7 — review/approval gates, reopen policy, escalation,
 // audit hash-chaining support, retention/access governance)
 include 'governance'
+// Catalog Studio (Phase 6, the 13th module) — presentation-only server-rendered UI (Thymeleaf +
+// htmx) over the catalog/governance/casecore services; no catalog semantics live here (plan.md
+// Structure Decision, tasks.md T001).
+include 'studio'
 
 // Shared test support (Testcontainers fixtures, ArchUnit rules)
 include 'test-support'

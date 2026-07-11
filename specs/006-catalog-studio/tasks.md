@@ -26,9 +26,17 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Purpose**: Stand up the new `studio` module, vendor its JS islands, and register config — no business logic yet.
 
-- [ ] T001 [P] Create `studio/build.gradle` (Spring Boot web + Thymeleaf + htmx starter, depends on `catalog`, `governance`, `casecore`; no Node/JS build chain — research R1) and add `include 'studio'` to `settings.gradle`, wiring `studio` as the 13th module into `:app`
-- [ ] T002 [P] Vendor and version-pin the JS islands under `studio/src/main/resources/static/studio/`: `dmn-js` (DMN decision-table editor, E6.1), `diff2html` (server-diff rendering, FR-005), and `htmx` (partial updates) — plain script-tag assets, no bundler (research R1)
-- [ ] T003 [P] Add Phase 6 config keys to `app/src/main/resources/application.yml`: `d2os.studio.roles.catalog-owner` and `d2os.studio.roles.architecture-board` (role-gating per Q8), `d2os.catalog.gate.subject-type: DEFINITION_VERSION`, and `d2os.catalog.benchmark.seed-versions: 500` (NFR-9 seed target)
+- [X] T001 [P] Create `studio/build.gradle` (Spring Boot web + Thymeleaf + htmx starter, depends on `catalog`, `governance`, `casecore`; no Node/JS build chain — research R1) and add `include 'studio'` to `settings.gradle`, wiring `studio` as the 13th module into `:app`
+- [X] T002 [P] Vendor and version-pin the JS islands under `studio/src/main/resources/static/studio/`: `dmn-js` (DMN decision-table editor, E6.1), `diff2html` (server-diff rendering, FR-005), and `htmx` (partial updates) — plain script-tag assets, no bundler (research R1).
+      **NOTE (sandbox limitation, same spirit as the V21/V22 renumbering notes above)**: this sandboxed
+      implementation environment has no outbound internet access, so the actual third-party JS/CSS
+      files could not be fetched. What landed is the directory structure
+      (`static/studio/vendor/{htmx,diff2html,dmn-js,dmn-js/assets}/`) and a README documenting the
+      exact pinned versions, expected filenames, and source URLs each later template will reference.
+      Marked done because the structural/contract deliverable (T011/T015 can be written against
+      stable paths) is complete; **a human or a later network-enabled step still needs to drop the
+      real vendored files in** before any studio page that loads them will actually work in a browser.
+- [X] T003 [P] Add Phase 6 config keys to `app/src/main/resources/application.yml`: `d2os.studio.roles.catalog-owner` and `d2os.studio.roles.architecture-board` (role-gating per Q8), `d2os.catalog.gate.subject-type: DEFINITION_VERSION`, and `d2os.catalog.benchmark.seed-versions: 500` (NFR-9 seed target)
 
 ---
 
@@ -36,10 +44,16 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Purpose**: Schema (V21/V22) + shared draft-lifecycle and gate-subject infrastructure every story depends on. MUST complete before any US phase. **All V21/V22 schema lands here; per-story logic follows.**
 
-- [ ] T004 Author `catalog/src/main/resources/db/migration/V21__studio_lifecycle_subscriptions.sql`: widen the `definition_asset` status CHECK to `('Draft','InReview','Published','Deprecated')` (adds `InReview` — research R2); add `derived_from_id uuid NULL REFERENCES definition_asset(id)` (fork provenance — research R4, FR-012) and `copied_from_id uuid NULL REFERENCES definition_asset(id)` (copy-on-subscribe provenance — research R6, FR-015); create the `library_subscription` table (`workspace_id`, `source_definition_id`, `copied_definition_id`, `subscribed_by`, `created_at`; UNIQUE `(workspace_id, source_definition_id)`) with RLS policy + `d2os_app` grants (research R6); add a GIN index (`jsonb_path_ops`) on `case_definition_snapshot.entries` for exact-pin containment (research R5, SC-005)
-- [ ] T005 Author `governance/src/main/resources/db/migration/V22__gate_subject_polymorphic.sql`: add `subject_type text NOT NULL DEFAULT 'ARTIFACT_REVISION'` and `subject_id uuid NULL` to `gate_instance`, backfill `subject_id` from `subject_artifact_revision_id`, and keep the artifact column as a deprecated read alias (research R3, T4-b)
-- [ ] T006 Generalize `GateService` to accept `('DEFINITION_VERSION', definition_asset.id)` gate subjects (open/decide against the polymorphic column) in `governance/src/main/java/com/d2os/governance/GateService.java` — the studio's D4 publish gate is an ordinary approval-gate instance (research R3). Blocks US2.
-- [ ] T007 Implement `catalog/src/main/java/com/d2os/catalog/DraftService.java`: create/load/update `Draft` rows (edit refused unless status `Draft`), the `InReview` freeze (content edits refused while a review is open), and content-hash pinning at submission (tamper guard verified at publish) — research R2, FR-001. Blocks US1 & US2.
+- [X] T004 Author `catalog/src/main/resources/db/migration/V25__studio_lifecycle_subscriptions.sql` (renumbered from the spec's V21 — V21-V24 were already taken by the time Phase 6 was implemented; see the migration's own header note, same convention as V20/V24): widen the `definition_asset` status CHECK to `('Draft','InReview','Published','Deprecated')` (adds `InReview` — research R2); add `derived_from_id uuid NULL REFERENCES definition_asset(id)` (fork provenance — research R4, FR-012) and `copied_from_id uuid NULL REFERENCES definition_asset(id)` (copy-on-subscribe provenance — research R6, FR-015); create the `library_subscription` table (`workspace_id`, `source_definition_id`, `copied_definition_id`, `subscribed_by`, `created_at`; UNIQUE `(workspace_id, source_definition_id)`) with RLS policy + `d2os_app` grants (research R6); add a GIN index (`jsonb_path_ops`) on `case_definition_snapshot.entries` for exact-pin containment (research R5, SC-005)
+- [X] T005 Author `governance/src/main/resources/db/migration/V26__gate_subject_polymorphic.sql` (renumbered from the spec's V22, immediately after catalog's V25 — same renumbering convention): add `subject_type text NOT NULL DEFAULT 'ARTIFACT_REVISION'` and `subject_id uuid NULL` to `gate_instance`, backfill `subject_id` from `subject_artifact_revision_id`, and keep the artifact column as a deprecated read alias (research R3, T4-b).
+      **Addition beyond the literal task text**: this same migration also widens `delta_report`
+      (makes `artifact_id`/`from_revision_id`/`to_revision_id` nullable, adds nullable
+      `from_definition_id`/`to_definition_id uuid NULL REFERENCES definition_asset(id)`, plus a CHECK
+      enforcing exactly one of the artifact-triple/definition-pair shapes per row) — done now, while
+      this governance migration is already touching gate schema, so the later T014
+      (definition-version DeltaReport for prompt/content diffs) needs no separate migration.
+- [X] T006 Generalize `GateService` to accept `('DEFINITION_VERSION', definition_asset.id)` gate subjects (open/decide against the polymorphic column) in `governance/src/main/java/com/d2os/governance/GateService.java` — the studio's D4 publish gate is an ordinary approval-gate instance (research R3). Added a NEW `GateInstance.GateSubjectType` enum + polymorphic `GateInstance` constructor and `GateService.open(...)` overload; the original ARTIFACT_REVISION-shaped constructor/overload are unchanged and still what `GateTaskBridge` (orchestration, the only current caller) calls. `decide(...)` unchanged (opaque to subject type, per research R3). Blocks US2.
+- [X] T007 Implement `catalog/src/main/java/com/d2os/catalog/DraftService.java`: create/load/update `Draft` rows (edit refused unless status `Draft`, enforced by a new `DefinitionAsset.updateBody` guard mirroring `DefinitionPublishService.publish`'s guard style), and a `DefinitionAsset.markInReview()` transition method added (but not yet wired — that is T013) so the `InReview` freeze falls out of the same Draft-only guard once status leaves Draft. Content-hash pinning at submission (tamper guard verified at publish) is T013's job, not this service's — noted as still open. Blocks US1 & US2.
 
 **Checkpoint**: V21/V22 schema, polymorphic gate subject, and draft-lifecycle service ready — user story phases can begin.
 

@@ -81,6 +81,29 @@ public class GateService {
     }
 
     /**
+     * Polymorphic-subject overload (V26, research R3, T4-b, tasks.md T006): opens a gate against
+     * any {@code (subjectType, subjectId)} pair — e.g. {@code (DEFINITION_VERSION,
+     * definition_asset.id)} for the studio's D4 publish gate — rather than only an
+     * ArtifactRevision. Deliberately a NEW overload, not a change to the existing {@code open}
+     * signature above: {@code GateTaskBridge} (orchestration, the only current caller) keeps
+     * calling the original ARTIFACT_REVISION-shaped overload unchanged. {@code decide(...)} needs
+     * no corresponding change — it is opaque to subject type (research R3).
+     */
+    @Transactional
+    public GateInstance open(UUID workspaceId, UUID caseInstanceId, GateType gateType,
+                             String gateDefinitionKey, int gateDefinitionVersion,
+                             GateInstance.GateSubjectType subjectType, UUID subjectId, String inputsRef,
+                             String escalationPolicyKey, Integer escalationPolicyVersion,
+                             String engineTaskId) {
+        GateInstance gate = new GateInstance(UUID.randomUUID(), workspaceId, caseInstanceId, gateType,
+                gateDefinitionKey, gateDefinitionVersion, subjectType, subjectId, inputsRef,
+                escalationPolicyKey, escalationPolicyVersion, engineTaskId);
+        gateInstanceRepository.save(gate);
+        gateEventPublisher.publishOpened(gate);
+        return gate;
+    }
+
+    /**
      * Decide an OPEN gate. Order of checks matches the design (T014): gate must be OPEN (else {@link
      * IllegalGateTransitionException}, 409), actor must not be barred by non-self-review (else {@link
      * SelfReviewNotAllowedException}, 403), then the Decision + AuditEntry + outbox event are written

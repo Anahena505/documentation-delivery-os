@@ -159,6 +159,25 @@ d2os:
       # Configurable longer, never shorter; RetentionVerificationJob (Phase 7, US5) reads the
       # per-workspace column, this key only seeds new workspaces / documents the enforced minimum.
       default-years: ${D2OS_GOVERNANCE_RETENTION_DEFAULT_YEARS:7}
+  # Catalog Studio (Phase 6, tasks.md T003). Role-gating per spec.md Q8: Catalog Owner is the
+  # single accountable publish owner; architecture-board decides the second MAJOR-version gate
+  # (research R3). Both are role *names* looked up the same way every other role-gated check in
+  # this codebase resolves a caller's roles — no new auth mechanism.
+  studio:
+    roles:
+      catalog-owner: ${D2OS_STUDIO_ROLE_CATALOG_OWNER:catalog-owner}
+      architecture-board: ${D2OS_STUDIO_ROLE_ARCHITECTURE_BOARD:architecture-board}
+  catalog:
+    gate:
+      # The gate_instance.subject_type value a studio publish gate opens with (V26 polymorphic
+      # subject, research R3) — 'DEFINITION_VERSION' pairs with definition_asset.id as subject_id.
+      subject-type: ${D2OS_CATALOG_GATE_SUBJECT_TYPE:DEFINITION_VERSION}
+    benchmark:
+      # NFR-9 seed volume for ResolutionBenchmarkIT (Phase 7, US5, T029/T030, research R7): 500
+      # published definition versions across the 8 types. tasks.md T003 names 500 explicitly (not
+      # a placeholder) — the benchmark's own job is proving pin resolution stays <= 2s at this
+      # scale, not tuning the scale itself.
+      seed-versions: ${D2OS_CATALOG_BENCHMARK_SEED_VERSIONS:500}
 
 server:
   port: 8080

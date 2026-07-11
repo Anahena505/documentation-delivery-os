@@ -18,7 +18,12 @@ import java.util.UUID;
 @Table(name = "definition_asset")
 public class DefinitionAsset {
 
-    public enum Status { Draft, Published, Deprecated }
+    /**
+     * V25 widens the DB CHECK to add {@code InReview} (Draft -&gt; InReview -&gt; Published -&gt;
+     * Deprecated, research R2, tasks.md T004/T007): a draft submitted for review is frozen —
+     * {@link #updateBody} refuses edits once status leaves {@code Draft}.
+     */
+    public enum Status { Draft, InReview, Published, Deprecated }
 
     @Id
     private UUID id;
@@ -77,6 +82,36 @@ public class DefinitionAsset {
         this.checksum = checksum;
         this.status = Status.Published.name();
         this.publishedAt = OffsetDateTime.now();
+    }
+
+    /**
+     * Studio draft editing (tasks.md T007, research R2, FR-001). Content edits are refused unless
+     * the row is still {@code Draft} — this is what makes the {@code InReview} freeze real (once
+     * {@link #markInReview} flips status, this guard starts rejecting edits) and, together with
+     * the V3 immutability trigger on Published rows, means a definition's body can only ever
+     * change while it is an editable Draft. Guard/exception style mirrors {@link
+     * DefinitionPublishService#publish}'s "Only Draft/... can X; key is status" pattern.
+     */
+    public void updateBody(String newBody) {
+        if (!Status.Draft.name().equals(status)) {
+            throw new IllegalStateException(
+                    "Only Draft definitions can be edited; " + key + " is " + status);
+        }
+        this.body = newBody;
+    }
+
+    /**
+     * Submit-for-review transition (Draft -&gt; InReview, research R2). Added now (T007) so it is
+     * cheap for T013 to wire the actual submit-for-review endpoint/gate-open later; not called
+     * from anywhere yet in this phase. Only legal from Draft, same guard style as {@link
+     * #updateBody}/{@link #markPublished}.
+     */
+    public void markInReview() {
+        if (!Status.Draft.name().equals(status)) {
+            throw new IllegalStateException(
+                    "Only Draft definitions can move to InReview; " + key + " is " + status);
+        }
+        this.status = Status.InReview.name();
     }
 
     public UUID getId() { return id; }
