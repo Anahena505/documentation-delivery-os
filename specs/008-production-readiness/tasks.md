@@ -418,9 +418,9 @@ results; DR rehearsal restores the real schema and passes integrity checks.
   feature, cross-referencing spec 008. Acceptance: file updated.
 - [ ] T068 Run `/opt/gradle/bin/gradle spotlessApply` then `spotlessCheck` to normalize formatting
   across all new files. Acceptance: `spotlessCheck` passes.
-- [ ] T069 Run the full local verification: `/opt/gradle/bin/gradle compileJava compileTestJava -q --rerun`
+- [X] T069 Run the full local verification: `/opt/gradle/bin/gradle compileJava compileTestJava -q --rerun`
   and `/opt/gradle/bin/gradle :test-support:test --tests ArchitectureRulesTest`. Acceptance: both green.
-- [ ] T070 Execute the `specs/008-production-readiness/quickstart.md` scenarios that do not require a
+- [X] T070 Execute the `specs/008-production-readiness/quickstart.md` scenarios that do not require a
   live cluster (unit layer, metrics endpoint via `@SpringBootTest`, migration presence) and record
   results in a new `specs/008-production-readiness/quickstart-results.md`. Acceptance: results file
   present.
