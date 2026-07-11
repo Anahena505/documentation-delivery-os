@@ -28,9 +28,15 @@
 
     Routing on the verb: `gateDecision` comes back out of the callActivity (flowable:out) once
     GateService.decide() completes the parked userTask. APPROVE proceeds to assemble-package/delivery;
-    REJECT/REQUEST_CHANGES halt at a dedicated end event — re-entering the persona path on
-    REQUEST_CHANGES (comment-and-regenerate, R2) is Phase 4/US2's RegenerationDelegate, not yet wired
-    into this workflow version.
+    REJECT halts at a dedicated end event (terminal — GateStatus.REJECTED has no further transitions);
+    REQUEST_CHANGES (Phase 5/US2, T019) routes to `regeneration-delegate`
+    (RegenerationDelegate.java, research R2), which re-enters the persona path with the reviewer's
+    comments injected as delimited untrusted data (T1-a) and produces a new ArtifactRevision + delta
+    report, then loops back to `review-gate-call` — a fresh engine userTask is spawned, GateTaskBridge's
+    `create` listener opens the new GateInstance cycle (T014) and attaches the delta report
+    RegenerationDelegate computed (carried across the callActivity boundary as the
+    `regenerationDeltaReportId` variable), and the reviewer is re-presented with the regenerated
+    artifact.
   -->
   <process id="initiation-v3" name="Initiation Case (full suite, governance gate)" isExecutable="true">
 
@@ -100,7 +106,7 @@
                  flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
     <sequenceFlow id="s10" sourceRef="technical-writer" targetRef="review-gate-call"/>
 
-    <!-- ===== Governance gate (T012/T014/T015, NEW in v3) ===== -->
+    <!-- ===== Governance gate (T012/T014/T015, NEW in v3; T019 adds the regeneration loop-back) ===== -->
     <callActivity id="review-gate-call" name="Review Gate" calledElement="review-gate">
       <extensionElements>
         <flowable:in source="workspaceId" target="workspaceId"/>
@@ -109,18 +115,31 @@
         <flowable:in sourceExpression="${'review-gate'}" target="gateDefinitionKey"/>
         <flowable:in sourceExpression="${1}" target="gateDefinitionVersion"/>
         <flowable:in sourceExpression="${'{}'}" target="inputsRef"/>
+        <!-- T019/T020: carries the delta report RegenerationDelegate just computed (if this is a
+             regeneration loop-back) across the callActivity boundary so GateTaskBridge's `create`
+             listener can attach it to the freshly-opened GateInstance. Absent on the first cycle. -->
+        <flowable:in source="regenerationDeltaReportId" target="regenerationDeltaReportId"/>
         <flowable:out source="gateDecision" target="gateDecision"/>
       </extensionElements>
     </callActivity>
     <sequenceFlow id="s10a" sourceRef="review-gate-call" targetRef="gw-gate"/>
 
-    <exclusiveGateway id="gw-gate" default="gate-not-approved"/>
+    <exclusiveGateway id="gw-gate" default="gate-rejected"/>
     <sequenceFlow id="gate-approved" sourceRef="gw-gate" targetRef="assemble-package">
       <conditionExpression xsi:type="tFormalExpression"><![CDATA[${gateDecision == 'APPROVE'}]]></conditionExpression>
     </sequenceFlow>
-    <sequenceFlow id="gate-not-approved" sourceRef="gw-gate" targetRef="gate-halted"/>
-    <endEvent id="gate-halted"
-              name="Gate not approved (REQUEST_CHANGES regeneration re-entry is Phase 4/US2, out of scope for v3)"/>
+    <sequenceFlow id="gate-request-changes" sourceRef="gw-gate" targetRef="regeneration-delegate">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${gateDecision == 'REQUEST_CHANGES'}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="gate-rejected" sourceRef="gw-gate" targetRef="gate-halted"/>
+    <endEvent id="gate-halted" name="Gate rejected (REJECTED is terminal — GateStatus permits no further transition)"/>
+
+    <!-- T019: comment-and-regenerate re-entry (RegenerationDelegate.java, research R2) — re-runs the
+         gated persona step with reviewer comments injected as delimited data, produces a new
+         ArtifactRevision + delta report, then loops back into review-gate-call for a fresh gate cycle. -->
+    <serviceTask id="regeneration-delegate" name="Regenerate from Reviewer Comments"
+                 flowable:async="true" flowable:delegateExpression="${regenerationDelegate}"/>
+    <sequenceFlow id="s10b" sourceRef="regeneration-delegate" targetRef="review-gate-call"/>
     <!-- ===== end governance gate ===== -->
 
     <serviceTask id="assemble-package" name="Assemble Package"

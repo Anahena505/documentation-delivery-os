@@ -23,12 +23,15 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Cross-tenant leakage suite (T047/T048, US3, SC-003). Creates a Case in workspace ALPHA and proves
@@ -108,6 +111,13 @@ class LeakageSuiteIT {
         String alphaCase = submitOpenAndStart(alpha, alphaFeatureId);
         String betaCase = submitOpenAndStart(beta, betaFeatureId);
 
+        // initiation-v3 (now the latest published initiation case_type) parks each run at an embedded
+        // review-gate callActivity before delivery. This is a tenant-isolation test, so ALPHA's gate is
+        // approved via ALPHA's own workspace context and BETA's via BETA's — never mixed — so the fix
+        // itself doesn't introduce a cross-workspace leak or perturb the isolation assertions below.
+        approveOpenGate(alphaCase, ALPHA, Duration.ofSeconds(120));
+        approveOpenGate(betaCase, BETA, Duration.ofSeconds(120));
+
         assertEquals("Delivered", poll(alphaCase, alpha, Duration.ofSeconds(200)),
                 "ALPHA's case should deliver while BETA runs concurrently");
         assertEquals("Delivered", poll(betaCase, beta, Duration.ofSeconds(200)),
@@ -136,6 +146,53 @@ class LeakageSuiteIT {
                 Map.of("submissionId", submissionId, "featureId", feature.toString()), h).getBody().get("id");
         rest.exchange(url("/api/v1/cases/" + caseId + "/start"), HttpMethod.POST, new HttpEntity<>(null, h), Void.class);
         return caseId;
+    }
+
+    /**
+     * Poll {@code GET /api/v1/gates?caseId=} (the same worklist endpoint {@code GateFlowIT} drives)
+     * until an OPEN gate appears for this case, then APPROVE it via the real {@code
+     * POST /api/v1/gates/{gateId}/decision} endpoint — using {@code ws}'s own workspace headers so a
+     * cross-workspace call is never made, which matters especially in this leakage suite. {@code
+     * reviewer-1} is not the case's own submitter (every {@code POST /api/v1/cases} records {@code
+     * createdBy = "api"}, per CaseController), so this doesn't trip GateService's non-self-review guard.
+     */
+    private void approveOpenGate(String caseId, UUID ws, Duration timeout) throws InterruptedException {
+        HttpHeaders h = headers(ws);
+        Instant deadline = Instant.now().plus(timeout);
+        while (Instant.now().isBefore(deadline)) {
+            List<Map<String, Object>> openGates = listOpenGates(caseId, h);
+            if (!openGates.isEmpty()) {
+                String gateId = (String) openGates.get(0).get("id");
+                decide(gateId, ws, "reviewer-1", "APPROVE");
+                return;
+            }
+            Thread.sleep(500);
+        }
+        fail("review-gate did not open for case " + caseId + " within " + timeout);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> listOpenGates(String caseId, HttpHeaders h) {
+        ResponseEntity<List> resp = rest.exchange(
+                url("/api/v1/gates?caseId=" + caseId), HttpMethod.GET, new HttpEntity<>(h), List.class);
+        assertEquals(200, resp.getStatusCode().value());
+        List<Map<String, Object>> gates = (List<Map<String, Object>>) (List<?>) resp.getBody();
+        List<Map<String, Object>> open = new ArrayList<>();
+        for (Map<String, Object> gate : gates) {
+            if ("OPEN".equals(gate.get("status"))) {
+                open.add(gate);
+            }
+        }
+        return open;
+    }
+
+    private void decide(String gateId, UUID ws, String actor, String verb) {
+        HttpHeaders h = headers(ws);
+        h.set("X-Actor", actor);
+        ResponseEntity<Map> resp = rest.exchange(
+                url("/api/v1/gates/" + gateId + "/decision"), HttpMethod.POST,
+                new HttpEntity<>(Map.of("verb", verb), h), Map.class);
+        assertEquals(200, resp.getStatusCode().value(), () -> "gate decision failed: " + resp.getBody());
     }
 
     private String poll(String caseId, HttpHeaders h, Duration timeout) throws InterruptedException {

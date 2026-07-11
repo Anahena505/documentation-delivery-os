@@ -52,6 +52,26 @@ public class GateEventPublisher {
                 deciderId, payload);
     }
 
+    /**
+     * {@code GATE_REGENERATION_TRIGGERED} (T022, research R8, FR-019) — emitted by {@code
+     * GateTaskBridge} (orchestration) at the moment it opens the NEW gate cycle a comment-and-regenerate
+     * re-entry produced (the {@code regenerationDeltaReportId} process variable {@code
+     * RegenerationDelegate} set is non-null), carrying the produced revision id per contracts/api.yaml's
+     * {@code GateEventPayload.producedArtifactRevisionId}. Uses plain (non-MANDATORY) {@code
+     * @Transactional} — unlike {@link #publishOpened}/{@link #publishDecided}, this is not always called
+     * from inside {@code GateService}'s own transaction, so it opens/joins one itself; {@link
+     * AuditWriter#record}'s MANDATORY requirement is still satisfied because a transaction is active by
+     * the time that call runs.
+     */
+    @Transactional
+    public void publishRegenerationTriggered(GateInstance newGate, UUID producedArtifactRevisionId) {
+        Map<String, Object> payload = basePayload("GATE_REGENERATION_TRIGGERED", newGate);
+        payload.put("producedArtifactRevisionId",
+                producedArtifactRevisionId == null ? null : producedArtifactRevisionId.toString());
+        auditWriter.record(newGate.getWorkspaceId(), "gate_instance", newGate.getId(), "GATE_REGENERATION_TRIGGERED",
+                "system:engine", payload);
+    }
+
     /** The projection-sufficient tuple every {@code GateEventPayload} shares (contracts/api.yaml). */
     private Map<String, Object> basePayload(String eventType, GateInstance gate) {
         Map<String, Object> payload = new LinkedHashMap<>();

@@ -91,11 +91,40 @@ migration from `governance`.
 
 **Independent Test**: At a gate, REQUEST_CHANGES with comments → a new ArtifactRevision is produced, the original is byte-unchanged, both appear in history, a delta report renders, and an API-surface scan confirms no artifact-content write path.
 
-- [ ] T019 [US2] Implement `RegenerationDelegate` (REQUEST_CHANGES → gate `REGENERATING`; re-enter the standard persona execution path with reviewer comments injected as **delimited untrusted data** (T1-a framing); produce a new immutable ArtifactRevision — never mutate a prior completion) in `orchestration/src/main/java/com/d2os/orchestration/RegenerationDelegate.java` (research R2, FR-004/005, Principle II)
-- [ ] T020 [P] [US2] Implement `DeltaReportService` (deterministic unified diff via `java-diff-utils` between prior and new revision; persist `delta_report` with `diff_hash` SHA-256) in `governance/src/main/java/com/d2os/governance/DeltaReportService.java` (research R2, FR-005)
-- [ ] T021 [US2] Add `GET /gates/{gateId}/delta-report` (404 when no regeneration/reopen has produced a delta) to `governance/src/main/java/com/d2os/governance/api/GateController.java` (contracts/api.yaml; FR-005)
-- [ ] T022 [US2] Emit `GATE_REGENERATION_TRIGGERED` outbox event (produced revision id in the payload) in `governance/src/main/java/com/d2os/governance/GateEventPublisher.java` (research R8, FR-019)
-- [ ] T023 [US2] Add `CommentRegenerateIT` in `app/src/test/java/com/d2os/app/CommentRegenerateIT.java`: REQUEST_CHANGES yields a new completion with the original retained byte-unchanged and both in history; delta report + hash present; **API-surface scan asserts no artifact-content write path exists** (SC-002, FR-004)
+- [X] T019 [US2] Implement `RegenerationDelegate` (REQUEST_CHANGES → gate `REGENERATING`; re-enter the standard persona execution path with reviewer comments injected as **delimited untrusted data** (T1-a framing); produce a new immutable ArtifactRevision — never mutate a prior completion) in `orchestration/src/main/java/com/d2os/orchestration/RegenerationDelegate.java` (research R2, FR-004/005, Principle II)
+- [X] T020 [P] [US2] Implement `DeltaReportService` (deterministic unified diff via `java-diff-utils` between prior and new revision; persist `delta_report` with `diff_hash` SHA-256) in `governance/src/main/java/com/d2os/governance/DeltaReportService.java` (research R2, FR-005)
+- [X] T021 [US2] Add `GET /gates/{gateId}/delta-report` (404 when no regeneration/reopen has produced a delta) to `governance/src/main/java/com/d2os/governance/api/GateController.java` (contracts/api.yaml; FR-005)
+- [X] T022 [US2] Emit `GATE_REGENERATION_TRIGGERED` outbox event (produced revision id in the payload) in `governance/src/main/java/com/d2os/governance/GateEventPublisher.java` (research R8, FR-019)
+- [X] T023 [US2] Add `CommentRegenerateIT` in `app/src/test/java/com/d2os/app/CommentRegenerateIT.java`: REQUEST_CHANGES yields a new completion with the original retained byte-unchanged and both in history; delta report + hash present; **API-surface scan asserts no artifact-content write path exists** (SC-002, FR-004)
+
+**T019 implementation note (as built)**: neither `initiation-v3` nor `assessment-v2` (T015) actually
+populates `gate_instance.subjectArtifactRevisionId` — no ArtifactRevision exists yet at gate-open time
+in either workflow (materialization was deferred entirely to `AssemblePackageDelegate`, post-approval).
+Without a subject revision there is nothing to regenerate against or diff, so `GateTaskBridge` (T010/T014)
+was extended to auto-resolve/materialize it via `ArtifactService.createRevision` whenever the callActivity
+doesn't supply one explicitly — idempotent by content hash (a matching `ArtifactService.createRevision`
+change: append a revision to the SAME `Artifact` when one already exists for the case+persona-key, or
+return the existing latest revision unchanged when the content hash matches, rather than always minting a
+new `Artifact`). `RegenerationDelegate` never opens the new `GateInstance` itself — it only regenerates the
+persona output, calls `ArtifactService.createRevision` (the single write choke point) and
+`DeltaReportService`, then hands the resulting `delta_report.id` forward as a `regenerationDeltaReportId`
+process variable; the BPMN loop re-enters `review-gate-call`, and `GateTaskBridge`'s existing `create`
+TaskListener — the one place a `GateInstance` row is ever created — opens the new gate cycle and attaches
+that delta report to it. `initiation-v3.bpmn20.xml`/`assessment-v2.bpmn20.xml`'s `gw-gate` gateway now
+routes `REQUEST_CHANGES` to a new `regeneration-delegate` serviceTask (`${regenerationDelegate}`) that
+loops back to `review-gate-call`, instead of the old REQUEST_CHANGES-falls-into-default-halt behavior;
+`REJECT` is now the gateway's explicit default branch to `gate-halted` (terminal, matching
+`GateStatus.REJECTED`). Compiles clean (`compileJava`/`compileTestJava`, full clean build); `GateFlowIT`
+(Phase 3) was hand-traced against the changed `GateTaskBridge`/`ArtifactService` and is unaffected (the
+auto-materialization is idempotent, so the later `AssemblePackageDelegate.materializeForCase` pass reuses
+rather than duplicates it). `CommentRegenerateIT`'s container-backed tests cannot actually run in this
+environment (no Docker) — traced by hand, not asserted to pass, same posture as `GateFlowIT`. Its
+API-surface-scan test (`noArtifactContentWritePathExistsOutsideCreateRevision`) is pure ArchUnit bytecode
+reflection needing no Spring context/DB, but is still gated by the shared `@SpringBootTest` class in this
+environment. **Known pre-existing gap, not introduced here**: `AssessmentReadOnlyIT` (Phase 4) creates
+Assessment cases without pinning a case-type version, so — since T015 (Phase 3) published `assessment-v2`
+as Assessment's latest — it likely now hits the gated workflow and needs a gate decision to reach
+`Delivered`; this predates T019-T023 and is out of this phase's scope to fix.
 
 **Checkpoint**: US2 independently testable — human interaction is comment-and-regenerate only; every version is retained and diffed.
 

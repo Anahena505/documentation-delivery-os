@@ -48,6 +48,12 @@ import static org.junit.jupiter.api.Assertions.fail;
  * <p>Phase 2 (T019): the pipeline now runs the full 13-persona canonical suite via {@code
  * initiation-v2}, so this test additionally asserts the delivered package covers every persona
  * (SC-002) — not just that the Case reached Delivered (SC-001).
+ *
+ * <p>Phase 5 (T015-equivalent): {@code initiation}'s latest published {@code case_type} is now
+ * {@code initiation-v3} — a gate-embedded copy of the prior flow with a {@code review-gate}
+ * callActivity before delivery (same gate surface {@code GateFlowIT} exercises directly). This test
+ * waits for that gate to open and APPROVEs it before polling for {@code Delivered}; this is purely a
+ * mechanism fix to reach the terminal state, all existing assertions are unchanged.
  */
 // StubAiGatewayClient MUST be explicitly @Import-ed: it's a @TestConfiguration, which Spring
 // deliberately excludes from component scanning (via TypeExcludeFilter), so @Import is the only
@@ -186,6 +192,13 @@ class SubmitToDeliverIT {
                 url("/api/v1/cases/" + caseId + "/start"), HttpMethod.POST, new HttpEntity<>(null, headers), Void.class);
         assertEquals(202, startResp.getStatusCode().value());
 
+        // 4b. initiation-v3 (now the latest published initiation case_type) parks the run at an
+        //     embedded review-gate callActivity before delivery. Wait for it to open, then APPROVE it
+        //     as a reviewer distinct from the case's own submitter ("api", CaseController) — same
+        //     non-self-review path GateFlowIT's approve test exercises — so the run can proceed to
+        //     deliver exactly like the original un-gated initiation flow this test targets.
+        approveOpenGate(caseId, headers, Duration.ofSeconds(120));
+
         // 5. Poll until Delivered (or Escalated, which would be a test failure). 13 async persona
         //    steps now run (full suite), so allow a wider window than the Phase 1 three-step pipeline.
         String finalStatus = pollUntilTerminal(caseId, headers, Duration.ofSeconds(120));
@@ -248,6 +261,57 @@ class SubmitToDeliverIT {
         }
         fail("case did not reach a terminal state within " + timeout + "\n" + dumpDiagnostics(caseId));
         return null;
+    }
+
+    /**
+     * Poll {@code GET /api/v1/gates?caseId=} (the same worklist endpoint {@code GateFlowIT} drives)
+     * until an OPEN gate appears for this case, then APPROVE it via the real {@code
+     * POST /api/v1/gates/{gateId}/decision} endpoint. {@code reviewer-1} is not the case's own
+     * submitter (every {@code POST /api/v1/cases} records {@code createdBy = "api"}, per
+     * CaseController), so this doesn't trip GateService's non-self-review guard.
+     */
+    private void approveOpenGate(String caseId, HttpHeaders headers, Duration timeout) throws InterruptedException {
+        Instant deadline = Instant.now().plus(timeout);
+        while (Instant.now().isBefore(deadline)) {
+            java.util.List<Map<String, Object>> openGates = listOpenGates(caseId, headers);
+            if (!openGates.isEmpty()) {
+                String gateId = (String) openGates.get(0).get("id");
+                decide(headersWithActor("reviewer-1"), gateId, "APPROVE");
+                return;
+            }
+            Thread.sleep(500);
+        }
+        fail("review-gate did not open for case " + caseId + " within " + timeout);
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.List<Map<String, Object>> listOpenGates(String caseId, HttpHeaders headers) {
+        ResponseEntity<java.util.List> resp = rest.exchange(
+                url("/api/v1/gates?caseId=" + caseId), HttpMethod.GET, new HttpEntity<>(headers), java.util.List.class);
+        assertEquals(200, resp.getStatusCode().value());
+        java.util.List<Map<String, Object>> gates = (java.util.List<Map<String, Object>>) (java.util.List<?>) resp.getBody();
+        java.util.List<Map<String, Object>> open = new java.util.ArrayList<>();
+        for (Map<String, Object> gate : gates) {
+            if ("OPEN".equals(gate.get("status"))) {
+                open.add(gate);
+            }
+        }
+        return open;
+    }
+
+    private void decide(HttpHeaders headers, String gateId, String verb) {
+        ResponseEntity<Map> resp = rest.exchange(
+                url("/api/v1/gates/" + gateId + "/decision"), HttpMethod.POST,
+                new HttpEntity<>(Map.of("verb", verb), headers), Map.class);
+        assertEquals(200, resp.getStatusCode().value(), () -> "gate decision failed: " + resp.getBody());
+    }
+
+    private HttpHeaders headersWithActor(String actor) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Workspace-Id", WORKSPACE_ID.toString());
+        headers.set("X-Actor", actor);
+        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        return headers;
     }
 
     /** On timeout, report exactly how far the async pipeline got, incl. any silent Flowable job failures. */

@@ -141,7 +141,8 @@ public class InfluenceEvaluationService {
                 base.caseId(), base.personaKey(), base.personaDefinitionId(), base.personaDefinitionVersion(),
                 base.promptDefinitionId(), base.promptDefinitionVersion(), base.promptTemplate(),
                 base.rubricDefinitionId(), base.rubricDefinitionVersion(), base.rubricJson(),
-                base.submissionFormDataJson(), injected, tokens, base.attachmentSummaries());
+                base.submissionFormDataJson(), injected, tokens, base.attachmentSummaries(),
+                base.regenerationComments());
     }
 
     private int nextSequenceNo(UUID caseId) {

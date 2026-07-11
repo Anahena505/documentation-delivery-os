@@ -51,7 +51,11 @@ public class ArtifactRevision {
     }
 
     public UUID getId() { return id; }
+    public UUID getWorkspaceId() { return workspaceId; }
     public UUID getArtifactId() { return artifactId; }
+    public int getRevisionNo() { return revisionNo; }
     public String getStorageRef() { return storageRef; }
     public String getContentHash() { return contentHash; }
+    public UUID getProducedByOperationExecutionId() { return producedByOperationExecutionId; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
 }

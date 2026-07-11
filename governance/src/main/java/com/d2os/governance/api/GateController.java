@@ -1,5 +1,7 @@
 package com.d2os.governance.api;
 
+import com.d2os.governance.DeltaReport;
+import com.d2os.governance.DeltaReportRepository;
 import com.d2os.governance.GateInstance;
 import com.d2os.governance.GateInstanceRepository;
 import com.d2os.governance.GateService;
@@ -32,12 +34,14 @@ public class GateController {
 
     private final GateInstanceRepository gateInstanceRepository;
     private final GateService gateService;
+    private final DeltaReportRepository deltaReportRepository;
     private final ObjectMapper objectMapper;
 
     public GateController(GateInstanceRepository gateInstanceRepository, GateService gateService,
-                          ObjectMapper objectMapper) {
+                          DeltaReportRepository deltaReportRepository, ObjectMapper objectMapper) {
         this.gateInstanceRepository = gateInstanceRepository;
         this.gateService = gateService;
+        this.deltaReportRepository = deltaReportRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -92,6 +96,23 @@ public class GateController {
         return ResponseEntity.ok(GateSummary.of(decided));
     }
 
+    /**
+     * {@code GET /gates/{gateId}/delta-report} (T021, contracts/api.yaml, FR-005): the deterministic
+     * diff a comment-and-regenerate cycle (or a reopen, US3) attached to this gate. 404 both when the
+     * gate itself doesn't exist and when it exists but no regeneration/reopen has produced a delta yet
+     * ({@code deltaReportId} is null) — the same "nothing to show" outcome either way.
+     */
+    @GetMapping("/{gateId}/delta-report")
+    public ResponseEntity<DeltaReportView> deltaReport(@PathVariable UUID gateId) {
+        return gateInstanceRepository.findById(gateId)
+                .map(GateInstance::getDeltaReportId)
+                .flatMap(deltaReportId -> deltaReportId == null
+                        ? java.util.Optional.<DeltaReport>empty()
+                        : deltaReportRepository.findById(deltaReportId))
+                .map(dr -> ResponseEntity.ok(DeltaReportView.of(dr)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
     private String defaultRoleFor(GateInstance g) {
         return g.getGateType() == GateInstance.GateType.APPROVAL ? "approver" : "reviewer";
     }
@@ -131,4 +152,13 @@ public class GateController {
                              String escalationPolicyKey, Integer escalationPolicyVersion,
                              UUID decisionId, OffsetDateTime openedAt, OffsetDateTime decidedAt,
                              Object inputsRef, String reviewerComments, UUID deltaReportId) {}
+
+    /** {@code GET /gates/{id}/delta-report} response body (T021). */
+    public record DeltaReportView(UUID id, UUID artifactId, UUID fromRevisionId, UUID toRevisionId,
+                                  String diffContent, String diffHash, OffsetDateTime createdAt) {
+        static DeltaReportView of(DeltaReport d) {
+            return new DeltaReportView(d.getId(), d.getArtifactId(), d.getFromRevisionId(), d.getToRevisionId(),
+                    d.getDiffContent(), d.getDiffHash(), d.getCreatedAt());
+        }
+    }
 }

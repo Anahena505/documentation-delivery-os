@@ -15,4 +15,12 @@ public interface GateInstanceRepository extends JpaRepository<GateInstance, UUID
     Optional<GateInstance> findByEngineTaskId(String engineTaskId);
 
     List<GateInstance> findByStatus(String status);
+
+    /**
+     * Phase 5 (T019, research R2): {@code RegenerationDelegate} (orchestration) looks up the case's
+     * most recently decided REGENERATING gate — the one REQUEST_CHANGES just transitioned — to read
+     * its {@code reviewerComments} and {@code subjectArtifactRevisionId} (the "from" revision for the
+     * eventual delta report).
+     */
+    Optional<GateInstance> findFirstByCaseInstanceIdAndStatusOrderByDecidedAtDesc(UUID caseInstanceId, String status);
 }

@@ -226,7 +226,7 @@ class KnowledgeRetrievalIT {
         PersonaEnvelope envelope = new PersonaEnvelope(
                 caseId, "solution-architect", UUID.randomUUID(), "1.0.0",
                 promptDefId, "1.0.0", "template body", UUID.randomUUID(), "1.0.0", "{}",
-                "{\"description\":\"x\"}", injected, 10, List.of());
+                "{\"description\":\"x\"}", injected, 10, List.of(), null);
 
         WorkspaceContext.set(WORKSPACE_ID);   // recorder writes on the workspace-aware datasource
         var execution = operationExecutionRecorder.record(
