@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             id="d2os-conditional-artifacts"
+             name="D2OS Conditional Artifacts"
+             namespace="http://d2os.com/dmn">
+  <!--
+    Phase 4 conditional-artifacts (T030, US5, research R6, FR-014/015). Hit policy COLLECT: every
+    matching row accumulates into the result (contrast with case-type-classification.dmn's UNIQUE) —
+    independent conditions can each add their own required artifact without conflicting, and a future
+    row can be added additively (zero-schema-change extension, FR-014) without touching this one.
+
+    CaseService (T032) evaluates this once per Case creation, folding every matching row into the
+    pinned CaseDefinitionSnapshot's expected-artifact set as a CONDITIONAL entry alongside the case
+    type's normal BASE entries — frozen at Planned time (AD-4), same as everything else in the
+    snapshot, so a later change to this table never perturbs an already-open Case.
+  -->
+  <decision id="conditionalArtifacts" name="Conditional Artifacts">
+    <decisionTable id="dt-conditional-artifacts" hitPolicy="COLLECT">
+      <input id="in-personalData" label="Personal Data">
+        <inputExpression id="ie-personalData" typeRef="boolean">
+          <text>personal_data</text>
+        </inputExpression>
+      </input>
+      <output id="out-templateKey" label="Template Key" name="templateKey" typeRef="string"/>
+      <output id="out-artifactKind" label="Artifact Kind" name="artifactKind" typeRef="string"/>
+      <output id="out-reason" label="Reason" name="reason" typeRef="string"/>
+
+      <!-- The submission's structured form data declares the subject involves personal data: a
+           Data Protection Impact Assessment becomes an additional required artifact. -->
+      <rule id="r-personal-data-dpia">
+        <inputEntry id="ie-r1-personalData"><text>true</text></inputEntry>
+        <outputEntry id="oe-r1-templateKey"><text>"template.dpia"</text></outputEntry>
+        <outputEntry id="oe-r1-artifactKind"><text>"DPIA"</text></outputEntry>
+        <outputEntry id="oe-r1-reason"><text>"personal_data=true"</text></outputEntry>
+      </rule>
+
+      <!-- personal_data=false matches nothing here: zero CONDITIONAL rows added, BASE set only. -->
+    </decisionTable>
+  </decision>
+</definitions>

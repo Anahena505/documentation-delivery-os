@@ -16,6 +16,19 @@ public class CaseExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
     }
 
+    /**
+     * T028 (US4, FR-012/013, contracts `MutatingConflict`): the Q2 guard's optimistic acquire found
+     * the Feature's mutating-case slot already occupied (or the version stale). {@code featureId} and
+     * {@code activeCaseId} ride as ProblemDetail extension properties per the contract schema.
+     */
+    @ExceptionHandler(MutatingGuardConflictException.class)
+    public ProblemDetail onMutatingConflict(MutatingGuardConflictException e) {
+        ProblemDetail detail = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+        detail.setProperty("featureId", e.getFeatureId());
+        detail.setProperty("activeCaseId", e.getActiveCaseId());
+        return detail;
+    }
+
     @ExceptionHandler(CaseCreationException.class)
     public ProblemDetail onUnprocessable(CaseCreationException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());

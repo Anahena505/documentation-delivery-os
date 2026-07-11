@@ -33,9 +33,18 @@ public class Feature {
     @Column(name = "agg_version", nullable = false)
     private long aggVersion;
 
+    /**
+     * The Phase 4 Q2 mutating-case-slot counter (V17, distinct from {@link #aggVersion} above — see
+     * that migration's header comment). Read-only from JPA's perspective: only {@code
+     * MutatingCaseGuard}'s raw guarded UPDATE ever writes it.
+     */
+    @Column(name = "aggregate_version", nullable = false)
+    private long aggregateVersion;
+
     protected Feature() {}
 
     public UUID getId() { return id; }
     public UUID getWorkspaceId() { return workspaceId; }
     public long getAggVersion() { return aggVersion; }
+    public long getAggregateVersion() { return aggregateVersion; }
 }

@@ -3,6 +3,7 @@ package com.d2os.casecore;
 import com.d2os.casecore.progress.ActiveCaseRegistry;
 import com.d2os.casecore.progress.ProgressEmitter;
 import com.d2os.casecore.progress.ProgressEvent;
+import com.d2os.casecore.spi.ConditionalArtifactPort;
 import com.d2os.casecore.spi.SubmissionLookup;
 import com.d2os.catalog.DefinitionRef;
 import com.d2os.catalog.DefinitionResolutionService;
@@ -41,6 +42,8 @@ public class CaseService {
     private final ObjectMapper objectMapper;
     private final ProgressEmitter progressEmitter;
     private final ActiveCaseRegistry activeCaseRegistry;
+    private final MutatingCaseGuard mutatingCaseGuard;
+    private final ConditionalArtifactPort conditionalArtifactPort;
     private final long defaultTokenBudget;
 
     public CaseService(CaseInstanceRepository caseRepository,
@@ -51,6 +54,8 @@ public class CaseService {
                        ObjectMapper objectMapper,
                        ProgressEmitter progressEmitter,
                        ActiveCaseRegistry activeCaseRegistry,
+                       MutatingCaseGuard mutatingCaseGuard,
+                       ConditionalArtifactPort conditionalArtifactPort,
                        @Value("${d2os.case.default-token-budget:1000000}") long defaultTokenBudget) {
         this.caseRepository = caseRepository;
         this.snapshotRepository = snapshotRepository;
@@ -60,6 +65,8 @@ public class CaseService {
         this.objectMapper = objectMapper;
         this.progressEmitter = progressEmitter;
         this.activeCaseRegistry = activeCaseRegistry;
+        this.mutatingCaseGuard = mutatingCaseGuard;
+        this.conditionalArtifactPort = conditionalArtifactPort;
         this.defaultTokenBudget = defaultTokenBudget;
     }
 
@@ -101,7 +108,16 @@ public class CaseService {
                     "an active mutating Case already exists on feature " + featureId);
         }
 
-        pinSnapshot(kase, caseType);
+        CaseDefinitionSnapshot snapshot = pinSnapshot(kase, caseType, submission);
+
+        // Phase 4 Q2 guard (T027, research R3, FR-012/013): only case types pinned mutating=true hold
+        // the Feature's single-active-mutating-case slot (Assessment, mutating=false, is exempt — T018).
+        // A conflict here throws before any audit entry is written and the whole @Transactional method
+        // rolls back, so a rejected create leaves no orphaned Case/snapshot row.
+        if (requiresMutatingSlot(snapshot)) {
+            mutatingCaseGuard.acquire(featureId, feature.getAggregateVersion(), kase.getId());
+        }
+
         auditWriter.record(kase.getWorkspaceId(), "case_instance", kase.getId(), "Planned", "api",
                 Map.of("caseTypeKey", caseType.key(), "caseTypeVersion", caseType.version()));
         return kase;
@@ -164,6 +180,11 @@ public class CaseService {
                 .orElseThrow(() -> new NoSuchElementException("case " + caseId));
         kase.transitionTo(target);
         caseRepository.save(kase);
+        // T027: release the Q2 mutating-case slot in the SAME transaction as the terminal transition.
+        // Idempotent no-op for a Case that never held the slot (Assessment, or a rejected create).
+        if (target.isTerminal()) {
+            mutatingCaseGuard.release(caseId);
+        }
         auditWriter.record(kase.getWorkspaceId(), "case_instance", caseId, target.name(), actor, details);
         if (target == CaseStatus.Escalated) {
             progressEmitter.emit(kase.getWorkspaceId(), caseId, ProgressEvent.Kind.ESCALATED);
@@ -192,24 +213,61 @@ public class CaseService {
      * snapshot rather than re-querying the live catalog. Existing case-type seeds (e.g. Initiation)
      * predate these fields; {@link #extractMutating} / {@link #extractArtifactKindAllowlist} default
      * to {@code mutating=true} / an empty (unrestricted) allowlist when absent, so nothing breaks.
+     *
+     * <p>Phase 4 US5 (T032, research R6, FR-014/019): additionally folds in the frozen
+     * expected-artifact set — one {@code required_artifact} entry per template the case type depends
+     * on (source {@code BASE}), plus every row the {@code conditionalArtifacts} DMN returns for this
+     * submission's form data (source {@code CONDITIONAL}, evaluated here, before pinning, so a later
+     * change to the DMN never perturbs an already-open Case). {@link #requiredArtifacts} reads this
+     * back out; {@code PackageAssemblyService} (T033) enforces it at delivery time.
      */
-    private void pinSnapshot(CaseInstance kase, DefinitionView caseType) {
+    private CaseDefinitionSnapshot pinSnapshot(CaseInstance kase, DefinitionView caseType,
+                                               SubmissionLookup.SubmissionInfo submission) {
         List<Map<String, Object>> entries = new ArrayList<>();
         entries.add(caseTypeEntry(caseType));
 
         for (String dep : parseDependsOn(caseType.body())) {
             String[] parts = dep.split(":", 2);
             if (parts.length != 2) continue;
-            definitionResolution.latestPublished(parts[0], parts[1])
-                    .ifPresentOrElse(
-                            ref -> entries.add(refEntry(ref)),
-                            () -> { throw new CaseCreationException(
-                                    "case type " + caseType.key() + " depends on unpublished " + dep); });
+            DefinitionView depView = definitionResolution.latestPublishedView(parts[0], parts[1])
+                    .orElseThrow(() -> new CaseCreationException(
+                            "case type " + caseType.key() + " depends on unpublished " + dep));
+            entries.add(refEntry(depView.toRef()));
+            if ("template".equals(parts[0])) {
+                entries.add(requiredArtifactEntry(depView.key(), extractKind(depView.body(), depView.key()),
+                        "BASE", null));
+            }
+        }
+
+        for (ConditionalArtifactPort.ConditionalArtifact ca : conditionalArtifactPort.evaluate(submission.formData())) {
+            entries.add(requiredArtifactEntry(ca.templateKey(), ca.artifactKind(), "CONDITIONAL", ca.reason()));
         }
 
         CaseDefinitionSnapshot snapshot = new CaseDefinitionSnapshot(
                 UUID.randomUUID(), kase.getWorkspaceId(), kase.getId(), toJson(entries));
         snapshotRepository.save(snapshot);
+        return snapshot;
+    }
+
+    private Map<String, Object> requiredArtifactEntry(String templateKey, String artifactKind,
+                                                       String source, String conditionalReason) {
+        Map<String, Object> entry = new java.util.LinkedHashMap<>();
+        entry.put("type", "required_artifact");
+        entry.put("templateKey", templateKey);
+        entry.put("artifactKind", artifactKind);
+        entry.put("source", source);
+        entry.put("conditionalReason", conditionalReason);
+        return entry;
+    }
+
+    /** A TemplateDefinition body's {@code kind} field (data-model.md); falls back to its own key. */
+    private String extractKind(String templateBody, String templateKey) {
+        try {
+            String kind = objectMapper.readTree(templateBody).path("kind").asText(null);
+            return kind != null && !kind.isBlank() ? kind : templateKey;
+        } catch (Exception e) {
+            return templateKey;
+        }
     }
 
     private List<String> parseDependsOn(String caseTypeBody) {
@@ -260,17 +318,40 @@ public class CaseService {
      * Phase 4 (T018, research R2/R3): true if a Case pinned to {@code snapshot} must hold the Q2
      * single-active-mutating-case guard slot on its Feature — i.e. the pinned case-type entry's
      * {@code mutating} flag. Assessment ({@code mutating=false}) is exempt and this returns
-     * {@code false} for it.
-     *
-     * <p><b>Not yet called anywhere.</b> {@link MutatingCaseGuard#acquire}/{@link
-     * MutatingCaseGuard#release} are not wired into {@link #openCase} or {@link #transition} yet —
-     * that wiring is T027 (Phase 6/US4), out of scope for this delivery. This helper exists now so
-     * T027's wiring is a one-line gate: {@code if (requiresMutatingSlot(snapshot)) { guard.acquire(...); }}
-     * — the exemption logic lands with the Assessment case type (this phase) rather than being
-     * invented later, even though the guard call site itself doesn't exist until T027.
+     * {@code false} for it. Called from {@link #openCase} (T027) to gate {@link
+     * MutatingCaseGuard#acquire}.
      */
     public boolean requiresMutatingSlot(CaseDefinitionSnapshot snapshot) {
         return CaseTypeCapability.from(objectMapper, snapshot).mutating();
+    }
+
+    /**
+     * Phase 4 US5 (T034, FR-014/015): every {@code required_artifact} entry the pinned snapshot froze
+     * in at {@link #pinSnapshot} — the case type's BASE templates plus any CONDITIONAL rows the
+     * conditional-artifacts DMN added. Read back by {@code GET /cases/{id}/required-artifacts} and by
+     * {@code PackageAssemblyService}'s completeness gate (T033).
+     */
+    public List<Map<String, Object>> requiredArtifacts(CaseDefinitionSnapshot snapshot) {
+        if (snapshot == null) {
+            return List.of();
+        }
+        try {
+            JsonNode entries = objectMapper.readTree(snapshot.getEntries());
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (JsonNode entry : entries) {
+                if (!"required_artifact".equals(entry.path("type").asText())) continue;
+                Map<String, Object> m = new java.util.LinkedHashMap<>();
+                m.put("templateKey", entry.path("templateKey").asText(null));
+                m.put("artifactKind", entry.path("artifactKind").asText(null));
+                m.put("source", entry.path("source").asText(null));
+                JsonNode reason = entry.path("conditionalReason");
+                m.put("conditionalReason", reason.isMissingNode() || reason.isNull() ? null : reason.asText());
+                result.add(m);
+            }
+            return result;
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     private String toJson(Object value) {
