@@ -32,6 +32,8 @@ import java.util.UUID;
 public class JwtService {
 
     private static final String WORKSPACE_CLAIM = "workspace_id";
+    /** HS256 requires a >= 256-bit (32-byte) key; jjwt otherwise throws a cryptic WeakKeyException. */
+    private static final int MIN_SECRET_BYTES = 32;
 
     private final JwtProperties properties;
     private final SecretKey key;
@@ -41,9 +43,22 @@ public class JwtService {
         // Deferred key material resolution: the app can boot (and non-auth suites can run) even if
         // D2OS_JWT_SECRET is unset; only issue()/validateAndExtractWorkspace() — the actual auth
         // path — fail, with a clear message rather than a startup crash unrelated to what's being run.
-        this.key = properties.secret() == null || properties.secret().isBlank()
-                ? null
-                : Keys.hmacShaKeyFor(properties.secret().getBytes(StandardCharsets.UTF_8));
+        String secret = properties.secret();
+        if (secret == null || secret.isBlank()) {
+            this.key = null;
+        } else {
+            byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+            // Validate length up front with an actionable message. Without this, a too-short secret
+            // fails deep inside Keys.hmacShaKeyFor with a WeakKeyException that names neither the
+            // property nor the fix — a confusing startup crash for an operator who set a short key.
+            if (secretBytes.length < MIN_SECRET_BYTES) {
+                throw new IllegalStateException(
+                        "D2OS_JWT_SECRET must be at least " + MIN_SECRET_BYTES + " bytes (256 bits) for "
+                                + "HS256 signing, but was " + secretBytes.length + " bytes. Generate a strong "
+                                + "secret with `openssl rand -base64 32`.");
+            }
+            this.key = Keys.hmacShaKeyFor(secretBytes);
+        }
     }
 
     /** Issue a signed token binding {@code subject} to {@code workspaceId} for the configured lifetime. */
