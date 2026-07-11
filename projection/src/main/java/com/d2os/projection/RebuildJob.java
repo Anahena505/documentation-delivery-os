@@ -45,12 +45,15 @@ import java.util.concurrent.Executors;
  * FEATURE}/{@code BELONGS_TO} (every {@code case_instance} row), {@code ARTIFACT_REVISION}/{@code
  * REQUIREMENT}/{@code OPERATION_EXECUTION}/{@code PRODUCED} (every {@code artifact_revision} row),
  * {@code GATE}/{@code GATED_BY} (every {@code gate_instance} row), {@code TRACES_TO}/{@code
- * DERIVES_FROM}/{@code SATISFIES} (every {@code trace_link} row). {@code PACKAGE}/{@code
- * execution_package}, {@code DEPENDS_ON}/{@code dependency} (no writer exists anywhere in the repo),
- * {@code KNOWLEDGE_ITEM_VERSION}/{@code INJECTED_INTO} (Phase 6/US4, tasks.md T025), and {@code
- * DEFINITION_VERSION} are deliberately NOT rebuilt in this phase — a generation this class purges-
- * and-replaces never had those types in it to begin with (the incremental {@link Projector} does
- * not project them either), so nothing is lost across a flip.
+ * DERIVES_FROM}/{@code SATISFIES} (every {@code trace_link} row), and — as of Phase 5 US3 (T021) —
+ * {@code DEPENDS_ON} (every {@code dependency} row; still writer-less at the application layer, see
+ * {@link Projector}'s javadoc, but wired here in lockstep with the incremental projector so a
+ * rebuild does not silently drop it), and {@code KNOWLEDGE_ITEM_VERSION}/{@code INJECTED_INTO}
+ * (every {@code knowledge_injection_snapshot} row, Phase 6/US4 T025, same lockstep reasoning).
+ * {@code PACKAGE}/{@code execution_package} and {@code DEFINITION_VERSION} are deliberately NOT
+ * rebuilt in this phase — a generation this class purges-and-replaces never had those types in it
+ * to begin with (the incremental {@link Projector} does not project them either), so nothing is
+ * lost across a flip.
  *
  * <h2>Provenance convention</h2>
  * Every {@code *Fact} built here uses the source row's own id as {@code sourceEventId}/{@code
@@ -249,6 +252,8 @@ public class RebuildJob {
                 buildArtifactRevisionNodes(workspaceId, generation, nodes, edges);
                 buildGateNodes(workspaceId, generation, nodes, edges);
                 buildTraceLinkNodes(workspaceId, generation, nodes, edges);
+                buildDependencyNodes(workspaceId, generation, nodes, edges);
+                buildInjectionSnapshotNodes(workspaceId, generation, nodes, edges);
                 return new BuiltGeneration(nodes, edges);
             });
         } finally {
@@ -318,6 +323,42 @@ public class RebuildJob {
                     (String) row.get("to_type"), (UUID) row.get("to_id"), (String) row.get("link_type"),
                     OffsetDateTime.now());
             NodeEdgeMapper.MappingResult result = mapper.mapTraceLink(fact, generation);
+            nodes.addAll(result.nodes());
+            edges.addAll(result.edges());
+        }
+    }
+
+    /** Phase 5 US3 (T021) — see {@link Projector}'s javadoc's "dependency/DEPENDS_ON — wired, still writer-less" section. */
+    private void buildDependencyNodes(UUID workspaceId, int generation, List<GraphNode> nodes, List<GraphEdge> edges) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, from_type, from_id, to_type, to_id, dep_type, created_at "
+                        + "FROM dependency WHERE workspace_id = ?",
+                workspaceId);
+        for (Map<String, Object> row : rows) {
+            NodeEdgeMapper.DependencyFact fact = new NodeEdgeMapper.DependencyFact(workspaceId,
+                    (UUID) row.get("id"), (String) row.get("from_type"), (UUID) row.get("from_id"),
+                    (String) row.get("to_type"), (UUID) row.get("to_id"), (String) row.get("dep_type"),
+                    OffsetDateTime.now());
+            NodeEdgeMapper.MappingResult result = mapper.mapDependency(fact, generation);
+            nodes.addAll(result.nodes());
+            edges.addAll(result.edges());
+        }
+    }
+
+    /** Phase 6 US4 (T025) — see {@link Projector}'s javadoc's "knowledge_injection_snapshot/INJECTED_INTO" section. */
+    private void buildInjectionSnapshotNodes(UUID workspaceId, int generation, List<GraphNode> nodes, List<GraphEdge> edges) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, operation_execution_id, knowledge_item_id, knowledge_item_key, "
+                        + "       knowledge_item_version, position "
+                        + "FROM knowledge_injection_snapshot WHERE workspace_id = ?",
+                workspaceId);
+        for (Map<String, Object> row : rows) {
+            NodeEdgeMapper.InjectionSnapshotFact fact = new NodeEdgeMapper.InjectionSnapshotFact(workspaceId,
+                    (UUID) row.get("id"), (UUID) row.get("operation_execution_id"),
+                    (UUID) row.get("knowledge_item_id"), (String) row.get("knowledge_item_key"),
+                    ((Number) row.get("knowledge_item_version")).intValue(),
+                    ((Number) row.get("position")).intValue(), OffsetDateTime.now());
+            NodeEdgeMapper.MappingResult result = mapper.mapInjectionSnapshot(fact, generation);
             nodes.addAll(result.nodes());
             edges.addAll(result.edges());
         }

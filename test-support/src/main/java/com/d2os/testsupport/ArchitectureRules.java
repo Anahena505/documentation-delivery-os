@@ -157,6 +157,29 @@ public final class ArchitectureRules {
                     + "studio itself, not catalog, precisely because it also needs governance)");
     }
 
+    /**
+     * {@code projection} is the sole writer of the five graph/projector-owned tables (Phase 7
+     * research R2, Principle III): no class outside {@code com.d2os.projection} may depend on
+     * {@code GraphWriteRepository}, the one class whose {@code JdbcTemplate} is bound to the
+     * {@code d2os_projector} role that actually holds INSERT/UPDATE/DELETE grants on {@code
+     * graph_node}/{@code graph_edge}/{@code projection_checkpoint}/{@code projection_state}/{@code
+     * projection_gap} (V28's REVOKE strips those grants from {@code d2os_app} outright). Already
+     * structurally guaranteed today — no other module's {@code build.gradle} depends on {@code
+     * projection} at all (only {@code app} does) — but pinned explicitly anyway, same value
+     * proposition as {@link #catalogDoesNotDependOnStudio} and {@link
+     * #governanceHasNoFlowableDependency}: an explicit, always-checked signal rather than an
+     * implicit consequence of today's module graph.
+     */
+    public static ArchRule projectionIsSoleWriterOfGraphTables() {
+        return noClasses()
+            .that().resideOutsideOfPackage("com.d2os.projection..")
+            .should().dependOnClassesThat().haveSimpleName("GraphWriteRepository")
+            .because("the projector (via GraphWriteRepository, the sole d2os_projector-bound write "
+                    + "path) is the only writer of the derived graph tables — every other module reads "
+                    + "them, at most, through the SELECT-only-granted app datasource (research R2, "
+                    + "Principle III)");
+    }
+
     public static void checkAll(JavaClasses importedClasses) {
         personaNoPeerCalls().check(importedClasses);
         onlyGatewayCallsProviders().check(importedClasses);
@@ -166,5 +189,6 @@ public final class ArchitectureRules {
         personaExecutionMachineryNeverRecursesIntoAnotherPersona().check(importedClasses);
         governanceHasNoFlowableDependency().check(importedClasses);
         catalogDoesNotDependOnStudio().check(importedClasses);
+        projectionIsSoleWriterOfGraphTables().check(importedClasses);
     }
 }
