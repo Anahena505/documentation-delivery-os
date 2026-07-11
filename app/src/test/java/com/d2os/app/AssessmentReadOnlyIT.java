@@ -34,6 +34,7 @@ import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -56,6 +57,17 @@ import static org.junit.jupiter.api.Assertions.fail;
  * ContainerFixtures#startAll()}, a {@link StubAiGatewayClient} import so persona calls are
  * deterministic and provider-free, and direct-JDBC tenancy seeding since there is no REST endpoint for
  * Workspace/Project/Feature provisioning.
+ *
+ * <p>Assessment's latest published {@code case_type} is now {@code assessment-v2} (Phase 5, T015,
+ * {@code CatalogSeedLoader.seedAssessmentV2}) — a gate-embedded copy of the original {@code
+ * assessment-v1} workflow this test was written against, with a {@code review-gate} callActivity
+ * before package assembly (same gate surface {@code GateFlowIT} exercises directly). Every freshly
+ * created Assessment case therefore now pauses at an OPEN {@link com.d2os.governance.GateInstance}
+ * mid-run, so this test waits for that gate to open and APPROVEs it (via the real {@code
+ * POST /api/v1/gates/{gateId}/decision} endpoint, mirroring {@code GateFlowIT}'s pattern exactly)
+ * before continuing to poll for {@code Delivered} — this is purely a mechanism fix to reach the
+ * terminal state; SC-003's assertions (read-only package contents, refused mutating write, untouched
+ * Feature baseline) are unchanged.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @org.springframework.context.annotation.Import(StubAiGatewayClient.class)
@@ -161,6 +173,13 @@ class AssessmentReadOnlyIT {
         ResponseEntity<Void> startResp = rest.exchange(
                 url("/api/v1/cases/" + caseId + "/start"), HttpMethod.POST, new HttpEntity<>(null, headers), Void.class);
         assertEquals(202, startResp.getStatusCode().value());
+
+        // 3b. assessment-v2 (now the latest published assessment case_type, T015) parks the run at an
+        //     embedded review-gate callActivity before package assembly. Wait for it to open, then
+        //     APPROVE it as a reviewer distinct from the case's own submitter ("api", CaseController) —
+        //     same non-self-review path GateFlowIT's approve test exercises — so the run can proceed to
+        //     assemble-package exactly like the original un-gated assessment-v1 flow this test targets.
+        approveOpenGate(caseId, headers, Duration.ofSeconds(120));
 
         String finalStatus = pollUntilTerminal(caseId, headers, Duration.ofSeconds(120));
         assertEquals("Delivered", finalStatus, "assessment case should reach Delivered with the stub gateway");
@@ -270,6 +289,53 @@ class AssessmentReadOnlyIT {
         return null;
     }
 
+    /**
+     * Poll {@code GET /api/v1/gates?caseId=} (the same worklist endpoint {@code GateFlowIT} drives)
+     * until an OPEN gate appears for this case, then APPROVE it via the real {@code
+     * POST /api/v1/gates/{gateId}/decision} endpoint. {@code reviewer-1} is not the case's own
+     * submitter (every {@code POST /api/v1/cases} records {@code createdBy = "api"}, per
+     * CaseController), so this doesn't trip GateService's non-self-review guard.
+     */
+    private void approveOpenGate(String caseId, HttpHeaders headers, Duration timeout) throws InterruptedException {
+        Instant deadline = Instant.now().plus(timeout);
+        while (Instant.now().isBefore(deadline)) {
+            List<Map<String, Object>> openGates = listOpenGates(caseId, headers);
+            if (!openGates.isEmpty()) {
+                String gateId = (String) openGates.get(0).get("id");
+                decide(headers, gateId, "reviewer-1", "APPROVE", null);
+                return;
+            }
+            Thread.sleep(500);
+        }
+        fail("review-gate did not open for case " + caseId + " within " + timeout);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> listOpenGates(String caseId, HttpHeaders headers) {
+        ResponseEntity<List> resp = rest.exchange(
+                url("/api/v1/gates?caseId=" + caseId), HttpMethod.GET, new HttpEntity<>(headers), List.class);
+        assertEquals(200, resp.getStatusCode().value());
+        List<Map<String, Object>> gates = (List<Map<String, Object>>) (List<?>) resp.getBody();
+        List<Map<String, Object>> open = new java.util.ArrayList<>();
+        for (Map<String, Object> gate : gates) {
+            if ("OPEN".equals(gate.get("status"))) {
+                open.add(gate);
+            }
+        }
+        return open;
+    }
+
+    private Map<String, Object> decide(HttpHeaders headers, String gateId, String actor, String verb, String comments) {
+        Map<String, Object> body = comments == null
+                ? Map.of("verb", verb)
+                : Map.of("verb", verb, "comments", comments);
+        ResponseEntity<Map> resp = rest.exchange(
+                url("/api/v1/gates/" + gateId + "/decision"), HttpMethod.POST,
+                new HttpEntity<>(body, headersWithActor(actor)), Map.class);
+        assertEquals(200, resp.getStatusCode().value(), () -> "gate decision failed: " + resp.getBody());
+        return resp.getBody();
+    }
+
     private Set<String> artifactTypesFor(String caseId) throws Exception {
         Set<String> types = new HashSet<>();
         try (Connection conn = dataSource.getConnection()) {
@@ -302,6 +368,12 @@ class AssessmentReadOnlyIT {
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-Workspace-Id", WORKSPACE_ID.toString());
         headers.setContentType(MediaType.APPLICATION_JSON);
+        return headers;
+    }
+
+    private HttpHeaders headersWithActor(String actor) {
+        HttpHeaders headers = headers();
+        headers.set("X-Actor", actor);
         return headers;
     }
 

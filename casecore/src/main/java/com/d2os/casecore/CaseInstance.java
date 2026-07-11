@@ -93,6 +93,7 @@ public class CaseInstance {
     public String getCaseTypeVersion() { return caseTypeVersion; }
     public String getMode() { return mode; }
     public String getStatus() { return status; }
+    public String getCreatedBy() { return createdBy; }
     public long getTokenBudget() { return tokenBudget; }
     public long getTokensSpent() { return tokensSpent; }
 }

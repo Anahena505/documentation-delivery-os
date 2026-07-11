@@ -1,0 +1,25 @@
+// Governance bounded context (Phase 5, BC-7, the 12th module — plan.md Project Structure, research
+// R1). Depends on:
+//   - tenancy   : WorkspaceContext / RLS binding (GateTaskBridge binds the engine job's tx exactly
+//                 like PersonaStepDelegate does)
+//   - catalog   : DefinitionAsset resolution — gate SUBPROCESS defs + ESCALATION_POLICY defs are
+//                 pinned/read through DefinitionAssetRepository
+//   - casecore  : DecisionRepository/AuditWriter — every gate transition writes a Decision +
+//                 AuditEntry in the SAME transaction (Principle V); no separate "EventPublisher"
+//                 abstraction exists elsewhere in this repo, AuditWriter IS the outbox writer
+//   - artifacts : ArtifactRevision resolution for gate inputs_ref / DeltaReportService diffing
+//
+// Deliberately NO Flowable dependency (plan.md Structure Decision): governance stays engine-
+// agnostic. Engine coupling is confined to orchestration's GateTaskBridge (mirrors
+// PersonaStepDelegate) — enforced later by an ArchUnit rule (Phase 9, T048).
+dependencies {
+    implementation project(':tenancy')
+    implementation project(':catalog')
+    implementation project(':casecore')
+    implementation project(':artifacts')
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // T002 (research R2): deterministic unified diffs for DeltaReportService — never an AI summary.
+    implementation 'io.github.java-diff-utils:java-diff-utils:4.17'
+}

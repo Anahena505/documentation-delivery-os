@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://d2os.com/bpmn"
+             id="d2os-assessment-v2-definitions">
+
+  <!--
+    Assessment workflow v2 (Phase 5, T015, US1, research R1, FR-001). A copy of assessment-v1.bpmn20.xml
+    (Phase 4 read-only assessment shape — intake -> parallel subject-analysis -> findings consolidation
+    -> recommendation -> package assembly, all UNCHANGED here; see that file's header) with ONE
+    addition: the SAME review-gate callActivity used by initiation-v3.bpmn20.xml (T012), inserted right
+    before assemble-package — the reused-by-reference gate contract R1 calls for ("the same gate is
+    reused across case types by reference, never re-implemented"): both v3/v2 workflows call the
+    identical `review-gate` ProcessDefinition, so GateFlowIT (T018) can assert the same gate definition
+    key/version serves both case types.
+
+    assessment-v1 / case_type:assessment v4.0.0 are left completely untouched (Principle I) — same
+    replay-safety reasoning as initiation-v3's header. Only NEW cases created after
+    CatalogSeedLoader publishes case_type:assessment v5.0.0 (T015) resolve to this file.
+
+    T019 (Phase 5/US2, research R2): REQUEST_CHANGES routes to `regeneration-delegate`
+    (RegenerationDelegate.java) exactly like initiation-v3's — see that file's header for the full
+    comment-and-regenerate loop-back explanation (identical shape here).
+  -->
+  <process id="assessment-v2" name="Assessment Case (read-only, governance gate)" isExecutable="true">
+
+    <startEvent id="start"/>
+    <sequenceFlow id="s0" sourceRef="start" targetRef="assessment-intake"/>
+
+    <serviceTask id="assessment-intake" name="Assessment Intake"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s1" sourceRef="assessment-intake" targetRef="subject-analysis-specialists"/>
+
+    <!-- ===== Parallel subject-analysis block (unchanged from v1) ===== -->
+    <serviceTask id="subject-analysis-specialists" name="Subject Analysis Specialists (Capability ∥ Gap ∥ Risk)"
+                 flowable:async="true" flowable:delegateExpression="${assessmentSubjectAnalysisDelegate}"/>
+    <sequenceFlow id="s2" sourceRef="subject-analysis-specialists" targetRef="gw-specialists"/>
+
+    <exclusiveGateway id="gw-specialists" default="w-spec-in"/>
+    <sequenceFlow id="v-spec" sourceRef="gw-specialists" targetRef="assessment-findings">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${validated}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="w-spec-in" sourceRef="gw-specialists" targetRef="specialists-wait"/>
+    <receiveTask id="specialists-wait" name="Await specialist escalation resolution"/>
+    <sequenceFlow id="w-spec-out" sourceRef="specialists-wait" targetRef="assessment-findings"/>
+    <!-- ===== end parallel block ===== -->
+
+    <serviceTask id="assessment-findings" name="Findings Consolidation"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s3" sourceRef="assessment-findings" targetRef="assessment-recommendation"/>
+
+    <serviceTask id="assessment-recommendation" name="Recommendation"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s4" sourceRef="assessment-recommendation" targetRef="review-gate-call"/>
+
+    <!-- ===== Governance gate (T012/T014/T015, NEW in v2) — same review-gate definition as initiation-v3;
+         T019 adds the regeneration loop-back ===== -->
+    <callActivity id="review-gate-call" name="Review Gate" calledElement="review-gate">
+      <extensionElements>
+        <flowable:in source="workspaceId" target="workspaceId"/>
+        <flowable:in source="caseId" target="caseInstanceId"/>
+        <flowable:in sourceExpression="${'REVIEW'}" target="gateType"/>
+        <flowable:in sourceExpression="${'review-gate'}" target="gateDefinitionKey"/>
+        <flowable:in sourceExpression="${1}" target="gateDefinitionVersion"/>
+        <flowable:in sourceExpression="${'{}'}" target="inputsRef"/>
+        <flowable:in source="regenerationDeltaReportId" target="regenerationDeltaReportId"/>
+        <flowable:out source="gateDecision" target="gateDecision"/>
+      </extensionElements>
+    </callActivity>
+    <sequenceFlow id="s4a" sourceRef="review-gate-call" targetRef="gw-gate"/>
+
+    <exclusiveGateway id="gw-gate" default="gate-rejected"/>
+    <sequenceFlow id="gate-approved" sourceRef="gw-gate" targetRef="assemble-package">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${gateDecision == 'APPROVE'}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="gate-request-changes" sourceRef="gw-gate" targetRef="regeneration-delegate">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${gateDecision == 'REQUEST_CHANGES'}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="gate-rejected" sourceRef="gw-gate" targetRef="gate-halted"/>
+    <endEvent id="gate-halted" name="Gate rejected (REJECTED is terminal — GateStatus permits no further transition)"/>
+
+    <serviceTask id="regeneration-delegate" name="Regenerate from Reviewer Comments"
+                 flowable:async="true" flowable:delegateExpression="${regenerationDelegate}"/>
+    <sequenceFlow id="s4b" sourceRef="regeneration-delegate" targetRef="review-gate-call"/>
+    <!-- ===== end governance gate ===== -->
+
+    <serviceTask id="assemble-package" name="Assemble Package"
+                 flowable:async="true" flowable:delegateExpression="${assemblePackageDelegate}"/>
+    <sequenceFlow id="s5" sourceRef="assemble-package" targetRef="end"/>
+
+    <endEvent id="end"/>
+  </process>
+</definitions>

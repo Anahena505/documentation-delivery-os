@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://d2os.com/bpmn"
+             id="d2os-review-gate-definitions">
+
+  <!--
+    Review Gate subprocess (Phase 5, T012, US1, research R1, FR-001). A STANDALONE ProcessDefinition
+    published as the SUBPROCESS DefinitionAsset `subprocess.review-gate` (CatalogSeedLoader.seedPhase5)
+    and invoked as a callActivity from case workflows (T015: initiation-v3, assessment-v2) — one
+    definition, reused by reference across case types (R1), never re-implemented per workflow.
+
+    Shape: start -> gate-decision (userTask) -> end. The userTask's `create` taskListener
+    (gateTaskBridge, GateTaskBridge.java) opens the GateInstance row and correlates engine_task_id;
+    GateService.decide() later completes this SAME task via TaskService.complete(engineTaskId,
+    {gateDecision: verb}) once the human decision (APPROVE/REJECT/REQUEST_CHANGES) is recorded as a
+    Decision + AuditEntry (governance module, Flowable-free). `gateDecision` becomes a variable on this
+    subprocess's execution once the task completes, which the CALLING process's callActivity
+    `flowable:out` mapping reads back to route on the verb (T015) — this process itself does not
+    branch on the verb; it is a pure reusable wait-and-report subprocess.
+
+    Process-variable contract this subprocess READS (set by the caller's callActivity `flowable:in`
+    mappings, T015 — not by this file, since T012 has no caller wired yet): workspaceId,
+    caseInstanceId, gateType, gateDefinitionKey, gateDefinitionVersion, inputsRef, and optionally
+    subjectArtifactRevisionId / escalationPolicyKey / escalationPolicyVersion (GateTaskBridge's exact
+    variable contract). It WRITES `gateDecision` (set by GateService.decide's engine-release call),
+    read back out by the caller's callActivity `flowable:out` mapping.
+
+    Non-interrupting boundary timer (research R4, Phase 6/US4 wiring point): advisory-SLA escalation
+    firing is NOT implemented in this phase (EscalationPolicyResolver/TimerFiredHandler are Phase 6,
+    T031-T037) — this boundary event exists now purely as the structural attach point R1/R4 describe,
+    so Phase 6 can wire a real handler onto it without a BPMN redeploy of every embedding workflow.
+    cancelActivity="false" is the load-bearing bit: the gate userTask is completely untouched when this
+    fires — no transition authority (Principle V), by construction, not discipline. The fixed P3D
+    duration is a placeholder matching the seeded `escalation-policy.default` step-0 duration
+    (CatalogSeedLoader) until EscalationPolicyResolver pins the gate's own escalation_policy_key/version
+    dynamically.
+  -->
+  <process id="review-gate" name="Review Gate" isExecutable="true">
+
+    <startEvent id="start"/>
+    <sequenceFlow id="g0" sourceRef="start" targetRef="gate-decision"/>
+
+    <userTask id="gate-decision" name="Reviewer Decision">
+      <extensionElements>
+        <flowable:taskListener event="create" delegateExpression="${gateTaskBridge}"/>
+      </extensionElements>
+    </userTask>
+    <sequenceFlow id="g1" sourceRef="gate-decision" targetRef="end"/>
+
+    <boundaryEvent id="gate-decision-sla-timer" attachedToRef="gate-decision" cancelActivity="false">
+      <timerEventDefinition>
+        <timeDuration>P3D</timeDuration>
+      </timerEventDefinition>
+    </boundaryEvent>
+    <sequenceFlow id="g2" sourceRef="gate-decision-sla-timer" targetRef="timer-escalation-marker"/>
+    <endEvent id="timer-escalation-marker"
+              name="SLA timer fired (advisory marker only — Phase 6/US4 TimerFiredHandler wiring point)"/>
+
+    <endEvent id="end"/>
+  </process>
+</definitions>

@@ -80,6 +80,16 @@ public class ExecutionEnvelopeBuilder {
     }
 
     public PersonaEnvelope build(UUID caseId, String personaKey) {
+        return build(caseId, personaKey, null);
+    }
+
+    /**
+     * Phase 5 (T019, research R2): {@code regenerationComments} is non-null only when this envelope is
+     * being built for a comment-and-regenerate re-entry ({@code RegenerationDelegate}, orchestration) —
+     * carried straight through onto the envelope for {@link PromptRenderer} to place inside its own
+     * untrusted-data delimiters (T1-a). Null for every ordinary persona step.
+     */
+    public PersonaEnvelope build(UUID caseId, String personaKey, String regenerationComments) {
         CaseInstance kase = caseRepository.findById(caseId)
                 .orElseThrow(() -> new NoSuchElementException("case " + caseId));
         CaseDefinitionSnapshot snapshot = snapshotRepository.findByCaseInstanceId(caseId)
@@ -115,7 +125,7 @@ public class ExecutionEnvelopeBuilder {
                 rubricDef.id(), rubricDef.version(), rubricDef.body(),
                 formDataJson,
                 injectedKnowledge, estimatedInjectedTokens,
-                attachmentSummaries);
+                attachmentSummaries, regenerationComments);
     }
 
     /** Sanitized attachment summaries for the submission, or empty when none/no port is wired (T044). */

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://d2os.com/bpmn"
+             id="d2os-initiation-v3-definitions">
+
+  <!--
+    Initiation workflow v3 (Phase 5, T015, US1, research R1, FR-001). A copy of initiation-v2.bpmn20.xml
+    (Phase 2's full canonical persona suite — see that file's header for the parallel-analysis and
+    consistency-check shape, both UNCHANGED here) with ONE addition: a review-gate callActivity
+    (T012) inserted right before assemble-package, so every Initiation case now flows through a
+    first-class, reusable governance gate before delivery instead of skipping straight to package
+    assembly (R1's "promote inline D4 review to a reusable subprocess").
+
+    initiation-v2 / case_type:initiation v2.0.0 are left completely untouched (Principle I) — cases
+    already running against v2 keep replaying their pinned snapshot; only NEW cases created after
+    CatalogSeedLoader publishes case_type:initiation v3.0.0 (T015) resolve to this file.
+
+    Gate wiring: the callActivity's `flowable:in` mappings translate this process's own variables
+    (`caseId`, set by CaseStartService.start — NOT `caseInstanceId`) into the exact variable-name
+    contract GateTaskBridge expects (see review-gate.bpmn20.xml / GateTaskBridge.java). `gateType` is
+    fixed to REVIEW: this gate is advisory documentation review before delivery, not a binding
+    approval — see approval-gate.bpmn20.xml's header for why the type distinction lives in the
+    variable, not the subprocess shape. `inputsRef` is a minimal `{}` placeholder for this phase —
+    populating it with the actual artifact-revision/rubric-score set under review is a follow-up
+    enrichment (data-model.md's fuller inputsRef shape), out of T015's scope.
+
+    Routing on the verb: `gateDecision` comes back out of the callActivity (flowable:out) once
+    GateService.decide() completes the parked userTask. APPROVE proceeds to assemble-package/delivery;
+    REJECT halts at a dedicated end event (terminal — GateStatus.REJECTED has no further transitions);
+    REQUEST_CHANGES (Phase 5/US2, T019) routes to `regeneration-delegate`
+    (RegenerationDelegate.java, research R2), which re-enters the persona path with the reviewer's
+    comments injected as delimited untrusted data (T1-a) and produces a new ArtifactRevision + delta
+    report, then loops back to `review-gate-call` — a fresh engine userTask is spawned, GateTaskBridge's
+    `create` listener opens the new GateInstance cycle (T014) and attaches the delta report
+    RegenerationDelegate computed (carried across the callActivity boundary as the
+    `regenerationDeltaReportId` variable), and the reviewer is re-presented with the regenerated
+    artifact.
+  -->
+  <process id="initiation-v3" name="Initiation Case (full suite, governance gate)" isExecutable="true">
+
+    <startEvent id="start"/>
+    <sequenceFlow id="s0" sourceRef="start" targetRef="intake-analyst"/>
+
+    <serviceTask id="intake-analyst" name="Intake Analyst"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s1" sourceRef="intake-analyst" targetRef="business-analyst"/>
+
+    <serviceTask id="business-analyst" name="Business Analyst"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s2" sourceRef="business-analyst" targetRef="product-functional-analyst"/>
+
+    <serviceTask id="product-functional-analyst" name="Product/Functional Analyst"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s3" sourceRef="product-functional-analyst" targetRef="solution-architect"/>
+
+    <serviceTask id="solution-architect" name="Solution Architect"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s4" sourceRef="solution-architect" targetRef="api-designer"/>
+
+    <serviceTask id="api-designer" name="API Designer"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s5" sourceRef="api-designer" targetRef="analysis-specialists"/>
+
+    <!-- ===== Parallel analysis-specialist block (unchanged from v2) ===== -->
+    <serviceTask id="analysis-specialists" name="Analysis Specialists (Security ∥ UX ∥ Data ∥ Infra)"
+                 flowable:async="true" flowable:delegateExpression="${parallelSpecialistsDelegate}"/>
+    <sequenceFlow id="s6" sourceRef="analysis-specialists" targetRef="gw-specialists"/>
+
+    <exclusiveGateway id="gw-specialists" default="w-spec-in"/>
+    <sequenceFlow id="v-spec" sourceRef="gw-specialists" targetRef="consistency-check">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${validated}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="w-spec-in" sourceRef="gw-specialists" targetRef="specialists-wait"/>
+    <receiveTask id="specialists-wait" name="Await specialist escalation resolution"/>
+    <sequenceFlow id="w-spec-out" sourceRef="specialists-wait" targetRef="consistency-check"/>
+    <!-- ===== end parallel block ===== -->
+
+    <!-- ===== Consistency-Check (unchanged from v2) ===== -->
+    <serviceTask id="consistency-check" name="Consistency Check"
+                 flowable:async="true" flowable:delegateExpression="${consistencyCheckDelegate}"/>
+    <sequenceFlow id="s6a" sourceRef="consistency-check" targetRef="gw-consistency"/>
+    <exclusiveGateway id="gw-consistency" default="w-cons-in"/>
+    <sequenceFlow id="v-cons" sourceRef="gw-consistency" targetRef="qa-test-strategist">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${consistencyClean}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="w-cons-in" sourceRef="gw-consistency" targetRef="consistency-wait"/>
+    <receiveTask id="consistency-wait" name="Await consistency resolution"/>
+    <sequenceFlow id="w-cons-out" sourceRef="consistency-wait" targetRef="qa-test-strategist"/>
+    <!-- ===== end consistency-check ===== -->
+
+    <serviceTask id="qa-test-strategist" name="QA/Test Strategist"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s7" sourceRef="qa-test-strategist" targetRef="risk-governance-officer"/>
+
+    <serviceTask id="risk-governance-officer" name="Risk &amp; Governance Officer"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s8" sourceRef="risk-governance-officer" targetRef="delivery-planner"/>
+
+    <serviceTask id="delivery-planner" name="Delivery Planner"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s9" sourceRef="delivery-planner" targetRef="technical-writer"/>
+
+    <serviceTask id="technical-writer" name="Technical Writer"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s10" sourceRef="technical-writer" targetRef="review-gate-call"/>
+
+    <!-- ===== Governance gate (T012/T014/T015, NEW in v3; T019 adds the regeneration loop-back) ===== -->
+    <callActivity id="review-gate-call" name="Review Gate" calledElement="review-gate">
+      <extensionElements>
+        <flowable:in source="workspaceId" target="workspaceId"/>
+        <flowable:in source="caseId" target="caseInstanceId"/>
+        <flowable:in sourceExpression="${'REVIEW'}" target="gateType"/>
+        <flowable:in sourceExpression="${'review-gate'}" target="gateDefinitionKey"/>
+        <flowable:in sourceExpression="${1}" target="gateDefinitionVersion"/>
+        <flowable:in sourceExpression="${'{}'}" target="inputsRef"/>
+        <!-- T019/T020: carries the delta report RegenerationDelegate just computed (if this is a
+             regeneration loop-back) across the callActivity boundary so GateTaskBridge's `create`
+             listener can attach it to the freshly-opened GateInstance. Absent on the first cycle. -->
+        <flowable:in source="regenerationDeltaReportId" target="regenerationDeltaReportId"/>
+        <flowable:out source="gateDecision" target="gateDecision"/>
+      </extensionElements>
+    </callActivity>
+    <sequenceFlow id="s10a" sourceRef="review-gate-call" targetRef="gw-gate"/>
+
+    <exclusiveGateway id="gw-gate" default="gate-rejected"/>
+    <sequenceFlow id="gate-approved" sourceRef="gw-gate" targetRef="assemble-package">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${gateDecision == 'APPROVE'}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="gate-request-changes" sourceRef="gw-gate" targetRef="regeneration-delegate">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${gateDecision == 'REQUEST_CHANGES'}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="gate-rejected" sourceRef="gw-gate" targetRef="gate-halted"/>
+    <endEvent id="gate-halted" name="Gate rejected (REJECTED is terminal — GateStatus permits no further transition)"/>
+
+    <!-- T019: comment-and-regenerate re-entry (RegenerationDelegate.java, research R2) — re-runs the
+         gated persona step with reviewer comments injected as delimited data, produces a new
+         ArtifactRevision + delta report, then loops back into review-gate-call for a fresh gate cycle. -->
+    <serviceTask id="regeneration-delegate" name="Regenerate from Reviewer Comments"
+                 flowable:async="true" flowable:delegateExpression="${regenerationDelegate}"/>
+    <sequenceFlow id="s10b" sourceRef="regeneration-delegate" targetRef="review-gate-call"/>
+    <!-- ===== end governance gate ===== -->
+
+    <serviceTask id="assemble-package" name="Assemble Package"
+                 flowable:async="true" flowable:delegateExpression="${assemblePackageDelegate}"/>
+    <sequenceFlow id="s11" sourceRef="assemble-package" targetRef="end"/>
+
+    <endEvent id="end"/>
+  </process>
+</definitions>

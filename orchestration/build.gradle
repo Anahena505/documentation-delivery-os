@@ -9,6 +9,10 @@ dependencies {
     // Delivered→capture outbox trigger drive the knowledge capture services. knowledge does NOT depend on
     // orchestration, so orchestration → knowledge is acyclic (persona ← knowledge stays one-way).
     implementation project(':knowledge')
+    // Phase 5: GateTaskBridge (engine userTask <-> governance GateInstance sync, T010) needs
+    // GateInstanceRepository. governance does NOT depend on orchestration (no Flowable dep, plan.md
+    // Structure Decision), so orchestration -> governance is acyclic.
+    implementation project(':governance')
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.flowable:flowable-spring-boot-starter'

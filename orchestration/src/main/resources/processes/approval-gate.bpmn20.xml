@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://d2os.com/bpmn"
+             id="d2os-approval-gate-definitions">
+
+  <!--
+    Approval Gate subprocess (Phase 5, T013, US1, research R1, FR-001). Structurally identical to
+    review-gate.bpmn20.xml (T012, see its comments for the full shape/contract rationale) — published
+    as the SUBPROCESS DefinitionAsset `subprocess.approval-gate`. Research R1/data-model.md draw the
+    REVIEW vs APPROVAL distinction at the `gate_type` level (data-model.md gate_instance.gate_type:
+    REVIEW | APPROVAL — advisory vs binding), which is a process-VARIABLE the calling workflow's
+    callActivity sets (`gateType: 'APPROVAL'`), not a structural BPMN difference; neither research.md
+    nor data-model.md specify a concrete structural difference between the two subprocess shapes, so
+    this file is deliberately kept parallel to review-gate.bpmn20.xml rather than inventing one.
+  -->
+  <process id="approval-gate" name="Approval Gate" isExecutable="true">
+
+    <startEvent id="start"/>
+    <sequenceFlow id="a0" sourceRef="start" targetRef="gate-decision"/>
+
+    <userTask id="gate-decision" name="Approver Decision">
+      <extensionElements>
+        <flowable:taskListener event="create" delegateExpression="${gateTaskBridge}"/>
+      </extensionElements>
+    </userTask>
+    <sequenceFlow id="a1" sourceRef="gate-decision" targetRef="end"/>
+
+    <!-- Non-interrupting boundary SLA timer — same Phase 6/US4 wiring-point rationale as review-gate. -->
+    <boundaryEvent id="gate-decision-sla-timer" attachedToRef="gate-decision" cancelActivity="false">
+      <timerEventDefinition>
+        <timeDuration>P3D</timeDuration>
+      </timerEventDefinition>
+    </boundaryEvent>
+    <sequenceFlow id="a2" sourceRef="gate-decision-sla-timer" targetRef="timer-escalation-marker"/>
+    <endEvent id="timer-escalation-marker"
+              name="SLA timer fired (advisory marker only — Phase 6/US4 TimerFiredHandler wiring point)"/>
+
+    <endEvent id="end"/>
+  </process>
+</definitions>

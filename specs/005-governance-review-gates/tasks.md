@@ -24,10 +24,10 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Purpose**: Stand up the new `governance` module, dependencies, and config — no business logic yet.
 
-- [ ] T001 Create the `governance` Gradle module: add `governance/build.gradle` (Spring Boot, JPA, Flyway, Flowable deps mirroring `orchestration/build.gradle`) and register `include 'governance'` in `settings.gradle`; wire `app` to depend on `:governance` in `app/build.gradle`
-- [ ] T002 [P] Add `java-diff-utils` (deterministic delta reports, research R2) to `governance/build.gradle`
-- [ ] T003 [P] Add Phase 5 config keys to `app/src/main/resources/application.yml`: `d2os.governance.sla.default-durations` (fallback when an EscalationPolicy omits a per-step duration — policy value wins, R4), `d2os.governance.retention.default-years: 7` (NFR-5, R6) — audit-chain sealing is a fixed hourly interval per FR-013 (no cadence config key); notifications are in-app only in v1 (no delivery-channel config; no email/webhook, R4)
-- [ ] T004 [P] Scaffold `ops/dr-drill.md` (empty section headers: Backup regime, Restore procedure, RPO/RTO measurement, Results) to be filled in US6 (research R7, NFR-8)
+- [X] T001 Create the `governance` Gradle module: add `governance/build.gradle` (Spring Boot, JPA, Flyway, Flowable deps mirroring `orchestration/build.gradle`) and register `include 'governance'` in `settings.gradle`; wire `app` to depend on `:governance` in `app/build.gradle`
+- [X] T002 [P] Add `java-diff-utils` (deterministic delta reports, research R2) to `governance/build.gradle`
+- [X] T003 [P] Add Phase 5 config keys to `app/src/main/resources/application.yml`: `d2os.governance.sla.default-durations` (fallback when an EscalationPolicy omits a per-step duration — policy value wins, R4), `d2os.governance.retention.default-years: 7` (NFR-5, R6) — audit-chain sealing is a fixed hourly interval per FR-013 (no cadence config key); notifications are in-app only in v1 (no delivery-channel config; no email/webhook, R4)
+- [X] T004 [P] Scaffold `ops/dr-drill.md` (empty section headers: Backup regime, Restore procedure, RPO/RTO measurement, Results) to be filled in US6 (research R7, NFR-8)
 
 ---
 
@@ -35,15 +35,35 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Purpose**: All V17–V20 schema, the engine↔governance bridge, and the new definition-asset types every story depends on. MUST complete before any US phase.
 
-- [ ] T005 Create `gate_instance`, `impact_assessment`, `gate_reopen_candidate`, `escalation_activation`, `delta_report`, and `in_app_notification` tables (each with `workspace_id`, RLS policy, `d2os_app` grants; `escalation_activation` append-only per data-model) in `governance/src/main/resources/db/migration/V17__governance_gates.sql`
-- [ ] T006 [P] Create `audit_chain_segment` table (per-workspace chain: `segment_seq` UNIQUE per workspace, `segment_hash`/`prev_segment_hash`, RLS + grants, append-only — T6-b) in `casecore/src/main/resources/db/migration/V18__audit_hash_chain.sql`
-- [ ] T007 [P] Create `package_access_grant` table (`(workspace_id, package_id, role)` UNIQUE, `granted_by`, `revoked_at`, RLS + grants — T3-d) in `artifacts/src/main/resources/db/migration/V19__package_access_grants.sql`
-- [ ] T008 [P] Add `retention_years int NOT NULL DEFAULT 7` and `retention_policy_notes text` columns to `workspace` (columns only — NFR-5, R6) in `tenancy/src/main/resources/db/migration/V20__workspace_retention.sql`
-- [ ] T009 Implement `GateInstance` entity/repository (state machine OPEN→APPROVED/REJECTED/REGENERATING/REOPEN_CANDIDATE/REOPENED per data-model) in `governance/src/main/java/com/d2os/governance/GateInstance.java` + `GateInstanceRepository.java`
-- [ ] T010 Implement `GateTaskBridge` (engine userTask ↔ `GateInstance` sync: create the gate row when the gate callActivity spawns its user task, correlate `engine_task_id`, complete the task on decide — same coupling pattern as `PersonaStepDelegate`) in `orchestration/src/main/java/com/d2os/orchestration/GateTaskBridge.java` (research R1)
-- [ ] T011 Seed the two gate `SUBPROCESS` DefinitionAssets and the `ESCALATION_POLICY` DefinitionAsset as new `definition_asset` `type` values (content-level, not schema) via `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` (data-model Modified Entities; R1/R4)
+> **Renumbering note (as implemented)**: V17/V18/V19 were already taken by Phase 4 migrations
+> (`tenancy/V17__feature_mutating_guard.sql`, `intake/V18__case_type_classification.sql`,
+> `casecore/V19__decision_case_instance_optional.sql`) by the time this phase was implemented —
+> Flyway's `classpath:db/migration` namespace is global across every module (see
+> `app/src/main/resources/application.yml`). The four migrations below were renumbered to the actual
+> next-free integers, same relative order, shifted by +3: **V20** (governance), **V21** (casecore
+> audit chain), **V22** (artifacts grants), **V23** (tenancy retention columns). A fifth migration not
+> anticipated by this task list, `catalog/src/main/resources/db/migration/V24__governance_definition_types.sql`,
+> was also added — required for T011's `SUBPROCESS`/`ESCALATION_POLICY` seed rows to pass
+> `definition_asset`'s `type` CHECK constraint (V3, catalog-owned).
 
-**Checkpoint**: Phase 5 schema (V17–V20), gate aggregate, engine bridge, and definition-asset types ready — user story phases can begin.
+- [X] T005 Create `gate_instance`, `impact_assessment`, `gate_reopen_candidate`, `escalation_activation`, `delta_report`, and `in_app_notification` tables (each with `workspace_id`, RLS policy, `d2os_app` grants; `escalation_activation` append-only per data-model) in `governance/src/main/resources/db/migration/V20__governance_gates.sql`
+- [X] T006 [P] Create `audit_chain_segment` table (per-workspace chain: `segment_seq` UNIQUE per workspace, `segment_hash`/`prev_segment_hash`, RLS + grants, append-only — T6-b) in `casecore/src/main/resources/db/migration/V21__audit_hash_chain.sql` (also relaxes `decision.decision_type`'s CHECK constraint to admit the Phase 5 gate verbs — see T006 note below)
+- [X] T007 [P] Create `package_access_grant` table (`(workspace_id, package_id, role)` UNIQUE, `granted_by`, `revoked_at`, RLS + grants — T3-d) in `artifacts/src/main/resources/db/migration/V22__package_access_grants.sql`
+- [X] T008 [P] Add `retention_years int NOT NULL DEFAULT 7` and `retention_policy_notes text` columns to `workspace` (columns only — NFR-5, R6) in `tenancy/src/main/resources/db/migration/V23__workspace_retention.sql`
+- [X] T009 Implement `GateInstance` entity/repository (state machine OPEN→APPROVED/REJECTED/REGENERATING/REOPEN_CANDIDATE/REOPENED per data-model) in `governance/src/main/java/com/d2os/governance/GateInstance.java` + `GateInstanceRepository.java`
+- [X] T010 Implement `GateTaskBridge` (engine userTask ↔ `GateInstance` sync: create the gate row when the gate callActivity spawns its user task, correlate `engine_task_id`, complete the task on decide — same coupling pattern as `PersonaStepDelegate`) in `orchestration/src/main/java/com/d2os/orchestration/GateTaskBridge.java` (research R1) — **T010 scope note**: only the create-gate-row-on-userTask-create half is implemented (a Flowable `TaskListener`); it is not yet referenced by any BPMN (that wiring, plus the complete-task-on-decide half, is T012/T013/T014, Phase 3)
+- [X] T011 Seed the two gate `SUBPROCESS` DefinitionAssets and the `ESCALATION_POLICY` DefinitionAsset as new `definition_asset` `type` values (content-level, not schema) via `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` (data-model Modified Entities; R1/R4)
+
+**Checkpoint**: Phase 5 schema (V20–V23), gate aggregate, engine bridge, and definition-asset types ready — user story phases can begin.
+
+**T006 decision_type note (as implemented)**: `decision.decision_type` (casecore V4) was `CHECK
+(decision_type IN ('D1','D2','D3','D4'))`; `'D4'` already has a specific meaning (the Knowledge
+Curator promotion gate, `PromotionGateService`) so Phase 5 gate decisions do not reuse it. V21 drops
+and recreates the constraint to additionally admit `'GATE_APPROVE'`, `'GATE_REJECT'`,
+`'GATE_REQUEST_CHANGES'`, `'GATE_REOPEN'` — landed in casecore's own migration (the table's owning
+module), matching this repo's existing precedent of a table's owning module altering that table's
+constraints (e.g. `observability/V15` widening `kpi_sample`'s CHECK) rather than a cross-module
+migration from `governance`.
 
 ---
 
@@ -53,13 +73,13 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Independent Test**: Run a case to a governance point → the decision is made through a gate subprocess with a reviewer view (`GET /gates/{id}` shows artifacts + exact inputs), and the recorded Decision names reviewer, reviewed artifacts/inputs, timestamp, and outcome — verifiable in the audit trail.
 
-- [ ] T012 [US1] Author `orchestration/src/main/resources/processes/review-gate.bpmn20.xml` (callActivity subprocess: userTask → decision gateway routing on the verb; APPROVE/REJECT/REQUEST_CHANGES paths) (research R1, FR-001)
-- [ ] T013 [P] [US1] Author `orchestration/src/main/resources/processes/approval-gate.bpmn20.xml` (callActivity subprocess: userTask carrying boundary-timer attach points for US4; verb routing) (research R1, FR-001)
-- [ ] T014 [US1] Implement `GateService.open(...)` and `GateService.decide(...)` — exactly three verbs APPROVE/REJECT/REQUEST_CHANGES; writes the `GateInstance` transition + Decision + AuditEntry in the **same transaction**; captures `inputs_ref` (artifact revisions, rubric scores, delta report id) at open; enforces reviewer role + non-self-review (FR-018) in `governance/src/main/java/com/d2os/governance/GateService.java` (research R1, FR-002/003/004)
-- [ ] T015 [US1] Embed the gate callActivities into new workflow versions `initiation-v3`, `assessment-v2`, `enhancement-v2` (running cases keep pinned prior versions — Principle I) and publish via `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` (data-model Modified Entities; FR-001)
-- [ ] T016 [US1] Implement gate lifecycle outbox emission per the `GateEventPayload` contract (GATE_OPENED, GATE_DECIDED — projection-sufficient tuple, no aggregate back-read) in `governance/src/main/java/com/d2os/governance/GateEventPublisher.java` (research R8, FR-019)
-- [ ] T017 [US1] Implement `GateController` (`GET /gates` worklist, `GET /gates/{gateId}` full view with resolved `inputs_ref`, `POST /gates/{gateId}/decision` — three verbs only, 403 self-review/role, 409 non-decidable) in `governance/src/main/java/com/d2os/governance/api/GateController.java` (contracts/api.yaml; FR-002)
-- [ ] T018 [US1] Add `GateFlowIT` in `app/src/test/java/com/d2os/app/GateFlowIT.java`: D4 flows through a gate subprocess; Decision records reviewer/inputs/timestamp/outcome; the same gate definition key/version serves Initiation + Assessment + Enhancement; **and every emitted outbox event validates against `GateEventPayload`** (SC-001, FR-019 payload-contract assertions)
+- [X] T012 [US1] Author `orchestration/src/main/resources/processes/review-gate.bpmn20.xml` (callActivity subprocess: userTask → decision gateway routing on the verb; APPROVE/REJECT/REQUEST_CHANGES paths) (research R1, FR-001)
+- [X] T013 [P] [US1] Author `orchestration/src/main/resources/processes/approval-gate.bpmn20.xml` (callActivity subprocess: userTask carrying boundary-timer attach points for US4; verb routing) (research R1, FR-001)
+- [X] T014 [US1] Implement `GateService.open(...)` and `GateService.decide(...)` — exactly three verbs APPROVE/REJECT/REQUEST_CHANGES; writes the `GateInstance` transition + Decision + AuditEntry in the **same transaction**; captures `inputs_ref` (artifact revisions, rubric scores, delta report id) at open; enforces reviewer role + non-self-review (FR-018) in `governance/src/main/java/com/d2os/governance/GateService.java` (research R1, FR-002/003/004)
+- [X] T015 [US1] Embed the gate callActivities into new workflow versions `initiation-v3`, `assessment-v2`, `enhancement-v2` (running cases keep pinned prior versions — Principle I) and publish via `catalog/src/main/java/com/d2os/catalog/CatalogSeedLoader.java` (data-model Modified Entities; FR-001) — **gap**: `enhancement-v2` NOT seeded — `case_type.enhancement`/`workflow.enhancement` don't exist anywhere in this codebase yet (spec 004 US3 unbuilt), so there is nothing to version; `initiation-v3` and `assessment-v2` are fully seeded with real gate-embedded BPMN
+- [X] T016 [US1] Implement gate lifecycle outbox emission per the `GateEventPayload` contract (GATE_OPENED, GATE_DECIDED — projection-sufficient tuple, no aggregate back-read) in `governance/src/main/java/com/d2os/governance/GateEventPublisher.java` (research R8, FR-019)
+- [X] T017 [US1] Implement `GateController` (`GET /gates` worklist, `GET /gates/{gateId}` full view with resolved `inputs_ref`, `POST /gates/{gateId}/decision` — three verbs only, 403 self-review/role, 409 non-decidable) in `governance/src/main/java/com/d2os/governance/api/GateController.java` (contracts/api.yaml; FR-002)
+- [X] T018 [US1] Add `GateFlowIT` in `app/src/test/java/com/d2os/app/GateFlowIT.java`: D4 flows through a gate subprocess; Decision records reviewer/inputs/timestamp/outcome; the same gate definition key/version serves Initiation + Assessment + Enhancement; **and every emitted outbox event validates against `GateEventPayload`** (SC-001, FR-019 payload-contract assertions) — drives Assessment (assessment-v2) through the gate; covers APPROVE→Delivered, REJECT→409 on redecide, REQUEST_CHANGES→reviewerComments, and self-review→403; cannot actually run in this environment (no Docker) — traced by hand against the real code, not asserted to pass
 
 **Checkpoint**: US1 independently testable — every decision flows through a reusable gate with a complete Decision record and projection-sufficient events.
 
@@ -71,11 +91,40 @@ Modular monolith: `<module>/src/main/java/com/d2os/<module>/…`, migrations in 
 
 **Independent Test**: At a gate, REQUEST_CHANGES with comments → a new ArtifactRevision is produced, the original is byte-unchanged, both appear in history, a delta report renders, and an API-surface scan confirms no artifact-content write path.
 
-- [ ] T019 [US2] Implement `RegenerationDelegate` (REQUEST_CHANGES → gate `REGENERATING`; re-enter the standard persona execution path with reviewer comments injected as **delimited untrusted data** (T1-a framing); produce a new immutable ArtifactRevision — never mutate a prior completion) in `orchestration/src/main/java/com/d2os/orchestration/RegenerationDelegate.java` (research R2, FR-004/005, Principle II)
-- [ ] T020 [P] [US2] Implement `DeltaReportService` (deterministic unified diff via `java-diff-utils` between prior and new revision; persist `delta_report` with `diff_hash` SHA-256) in `governance/src/main/java/com/d2os/governance/DeltaReportService.java` (research R2, FR-005)
-- [ ] T021 [US2] Add `GET /gates/{gateId}/delta-report` (404 when no regeneration/reopen has produced a delta) to `governance/src/main/java/com/d2os/governance/api/GateController.java` (contracts/api.yaml; FR-005)
-- [ ] T022 [US2] Emit `GATE_REGENERATION_TRIGGERED` outbox event (produced revision id in the payload) in `governance/src/main/java/com/d2os/governance/GateEventPublisher.java` (research R8, FR-019)
-- [ ] T023 [US2] Add `CommentRegenerateIT` in `app/src/test/java/com/d2os/app/CommentRegenerateIT.java`: REQUEST_CHANGES yields a new completion with the original retained byte-unchanged and both in history; delta report + hash present; **API-surface scan asserts no artifact-content write path exists** (SC-002, FR-004)
+- [X] T019 [US2] Implement `RegenerationDelegate` (REQUEST_CHANGES → gate `REGENERATING`; re-enter the standard persona execution path with reviewer comments injected as **delimited untrusted data** (T1-a framing); produce a new immutable ArtifactRevision — never mutate a prior completion) in `orchestration/src/main/java/com/d2os/orchestration/RegenerationDelegate.java` (research R2, FR-004/005, Principle II)
+- [X] T020 [P] [US2] Implement `DeltaReportService` (deterministic unified diff via `java-diff-utils` between prior and new revision; persist `delta_report` with `diff_hash` SHA-256) in `governance/src/main/java/com/d2os/governance/DeltaReportService.java` (research R2, FR-005)
+- [X] T021 [US2] Add `GET /gates/{gateId}/delta-report` (404 when no regeneration/reopen has produced a delta) to `governance/src/main/java/com/d2os/governance/api/GateController.java` (contracts/api.yaml; FR-005)
+- [X] T022 [US2] Emit `GATE_REGENERATION_TRIGGERED` outbox event (produced revision id in the payload) in `governance/src/main/java/com/d2os/governance/GateEventPublisher.java` (research R8, FR-019)
+- [X] T023 [US2] Add `CommentRegenerateIT` in `app/src/test/java/com/d2os/app/CommentRegenerateIT.java`: REQUEST_CHANGES yields a new completion with the original retained byte-unchanged and both in history; delta report + hash present; **API-surface scan asserts no artifact-content write path exists** (SC-002, FR-004)
+
+**T019 implementation note (as built)**: neither `initiation-v3` nor `assessment-v2` (T015) actually
+populates `gate_instance.subjectArtifactRevisionId` — no ArtifactRevision exists yet at gate-open time
+in either workflow (materialization was deferred entirely to `AssemblePackageDelegate`, post-approval).
+Without a subject revision there is nothing to regenerate against or diff, so `GateTaskBridge` (T010/T014)
+was extended to auto-resolve/materialize it via `ArtifactService.createRevision` whenever the callActivity
+doesn't supply one explicitly — idempotent by content hash (a matching `ArtifactService.createRevision`
+change: append a revision to the SAME `Artifact` when one already exists for the case+persona-key, or
+return the existing latest revision unchanged when the content hash matches, rather than always minting a
+new `Artifact`). `RegenerationDelegate` never opens the new `GateInstance` itself — it only regenerates the
+persona output, calls `ArtifactService.createRevision` (the single write choke point) and
+`DeltaReportService`, then hands the resulting `delta_report.id` forward as a `regenerationDeltaReportId`
+process variable; the BPMN loop re-enters `review-gate-call`, and `GateTaskBridge`'s existing `create`
+TaskListener — the one place a `GateInstance` row is ever created — opens the new gate cycle and attaches
+that delta report to it. `initiation-v3.bpmn20.xml`/`assessment-v2.bpmn20.xml`'s `gw-gate` gateway now
+routes `REQUEST_CHANGES` to a new `regeneration-delegate` serviceTask (`${regenerationDelegate}`) that
+loops back to `review-gate-call`, instead of the old REQUEST_CHANGES-falls-into-default-halt behavior;
+`REJECT` is now the gateway's explicit default branch to `gate-halted` (terminal, matching
+`GateStatus.REJECTED`). Compiles clean (`compileJava`/`compileTestJava`, full clean build); `GateFlowIT`
+(Phase 3) was hand-traced against the changed `GateTaskBridge`/`ArtifactService` and is unaffected (the
+auto-materialization is idempotent, so the later `AssemblePackageDelegate.materializeForCase` pass reuses
+rather than duplicates it). `CommentRegenerateIT`'s container-backed tests cannot actually run in this
+environment (no Docker) — traced by hand, not asserted to pass, same posture as `GateFlowIT`. Its
+API-surface-scan test (`noArtifactContentWritePathExistsOutsideCreateRevision`) is pure ArchUnit bytecode
+reflection needing no Spring context/DB, but is still gated by the shared `@SpringBootTest` class in this
+environment. **Known pre-existing gap, not introduced here**: `AssessmentReadOnlyIT` (Phase 4) creates
+Assessment cases without pinning a case-type version, so — since T015 (Phase 3) published `assessment-v2`
+as Assessment's latest — it likely now hits the gated workflow and needs a gate decision to reach
+`Delivered`; this predates T019-T023 and is out of this phase's scope to fix.
 
 **Checkpoint**: US2 independently testable — human interaction is comment-and-regenerate only; every version is retained and diffed.
 

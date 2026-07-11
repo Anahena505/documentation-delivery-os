@@ -21,6 +21,13 @@ import java.util.UUID;
  * submission's attachments — the ONLY attachment-derived text a persona may consume. The builder reads
  * these through {@code AttachmentSummaryPort}, never the raw object-store bytes, and the renderer places
  * them inside untrusted-data delimiters. Empty when the submission has no summarized attachments.
+ *
+ * <p>Phase 5 (T019, research R2, Q4): {@code regenerationComments} carries a gate reviewer's
+ * REQUEST_CHANGES comments when this envelope is built for a comment-and-regenerate re-entry
+ * ({@code RegenerationDelegate}, orchestration) — null/blank for every ordinary (non-regeneration)
+ * persona step, keeping pre-Phase-5 behavior byte-identical. Like attachment summaries, the renderer
+ * places this text inside its own untrusted-data delimiters (T1-a) — a reviewer's comment can never
+ * be read as an instruction by the persona.
  */
 public record PersonaEnvelope(
         UUID caseId,
@@ -36,6 +43,7 @@ public record PersonaEnvelope(
         String submissionFormDataJson,
         List<KnowledgeProvider.InjectedItem> injectedKnowledge,
         int estimatedInjectedTokens,
-        List<String> attachmentSummaries
+        List<String> attachmentSummaries,
+        String regenerationComments
 ) {
 }

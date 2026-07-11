@@ -94,6 +94,29 @@ public class ArtifactService {
             }
         }
 
+        // Phase 5 (T019/T020, research R2, Q4): if this persona key already has a materialized
+        // Artifact for this case (e.g. the gate-open path pre-materialized it for review, or this is a
+        // comment-and-regenerate re-entry), APPEND a new revision to that SAME Artifact — never mint a
+        // second Artifact for content that is logically a correction of the first. Idempotent when the
+        // content is byte-identical to the latest revision (the read-only-guarded approve-path
+        // re-materialization at assemble-package would otherwise re-insert the exact same bytes as a
+        // pointless new revision every time).
+        Optional<Artifact> existing = artifactRepository
+                .findFirstByCaseInstanceIdAndArtifactTypeOrderByCreatedAtDesc(targetCaseId, output.personaKey());
+        if (existing.isPresent()) {
+            Artifact artifact = existing.get();
+            Optional<ArtifactRevision> latest =
+                    revisionRepository.findFirstByArtifactIdOrderByRevisionNoDesc(artifact.getId());
+            if (latest.isPresent() && latest.get().getContentHash().equals(output.contentHash())) {
+                return latest;   // unchanged content — no new revision, never mutate the existing one
+            }
+            int nextRevisionNo = latest.map(ArtifactRevision::getRevisionNo).orElse(0) + 1;
+            ArtifactRevision revision = new ArtifactRevision(
+                    UUID.randomUUID(), workspaceId, artifact.getId(), nextRevisionNo,
+                    output.storageRef(), output.contentHash(), output.operationExecutionId());
+            return Optional.of(revisionRepository.save(revision));
+        }
+
         Artifact artifact = new Artifact(
                 UUID.randomUUID(), workspaceId, targetCaseId,
                 // Template definition association is deferred (see T020 note: template content
@@ -132,7 +155,7 @@ public class ArtifactService {
      * anything not explicitly recognized as recommendation content falls back to {@code FINDINGS}
      * rather than to a permissive wildcard.
      */
-    private String deriveArtifactKind(String personaKey) {
+    public String deriveArtifactKind(String personaKey) {
         return personaKey != null && personaKey.contains("recommendation") ? "RECOMMENDATION" : "FINDINGS";
     }
 }

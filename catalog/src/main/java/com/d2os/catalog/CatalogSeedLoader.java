@@ -38,6 +38,7 @@ public class CatalogSeedLoader implements ApplicationRunner {
     private static final String V2 = "2.0.0";
     private static final String V3 = "3.0.0";
     private static final String V4 = "4.0.0";
+    private static final String V5 = "5.0.0";
 
     /** One documentation persona of the Phase 2 suite (T011). */
     private record Persona(String key, String title, String charter, String artifact,
@@ -102,6 +103,7 @@ public class CatalogSeedLoader implements ApplicationRunner {
         seedPhase2();
         seedPhase3();
         seedPhase4();
+        seedPhase5();
     }
 
     // ---- Phase 1 v1.0.0 (kept published for replay of Phase 1 cases; Principle I) ------------------
@@ -614,6 +616,107 @@ public class CatalogSeedLoader implements ApplicationRunner {
                 {"name":"Assessment Findings","kind":"FINDINGS","producedBy":"assessment-findings"}""");
         seed("template", "assessment-recommendation", V4, """
                 {"name":"Assessment Recommendation","kind":"RECOMMENDATION","producedBy":"assessment-recommendation"}""");
+    }
+
+    // ---- Phase 5 v5.0.0 (governance gate SUBPROCESS defs + default ESCALATION_POLICY, T011) ------
+
+    /**
+     * Seeds the two gate {@code SUBPROCESS} DefinitionAssets and the default {@code
+     * ESCALATION_POLICY} DefinitionAsset (data-model.md "Modified Entities" — new {@code
+     * definition_asset.type} values, content-level, widened by catalog's V24 migration). Bodies are
+     * intentionally minimal placeholders here: the actual {@code review-gate.bpmn20.xml} / {@code
+     * approval-gate.bpmn20.xml} process definitions land in Phase 3 (T012/T013), and {@code
+     * GateService}/{@code EscalationPolicyResolver} (also later phases) are what actually reads these
+     * bodies at runtime. Seeded now so Phase 3+ can reference them by (type,key,version) immediately.
+     */
+    private void seedPhase5() {
+        seed("SUBPROCESS", "subprocess.review-gate", V5, """
+                {"processDefinitionKey":"review-gate","engine":"flowable"}""");
+        seed("SUBPROCESS", "subprocess.approval-gate", V5, """
+                {"processDefinitionKey":"approval-gate","engine":"flowable"}""");
+
+        // Default advisory-SLA role chain (research R4): mirrors d2os.governance.sla.default-durations
+        // (T003, application.yml) as the per-step fallback duration when a gate doesn't pin a longer
+        // chain of its own.
+        seed("ESCALATION_POLICY", "escalation-policy.default", V5, """
+                {"steps":[{"stepIndex":0,"role":"reviewer","durationIso8601":"P3D"}]}""");
+
+        seedInitiationV3();
+        seedAssessmentV2();
+        // enhancement-v2 is INTENTIONALLY NOT seeded here (T015 scope note): neither `case_type.enhancement`
+        // nor `workflow.enhancement` exist anywhere in this codebase yet — spec 004's Phase 5/US3
+        // (Enhancement case type) is unbuilt. There is nothing to version: seeding an "enhancement-v2"
+        // workflow/case_type now would mean either superseding a v1 that was never published, or fabricating
+        // an Enhancement case type wholesale, neither of which is this task's job. Tracked as a dependency
+        // gap; revisit once a future phase ships case_type.enhancement/workflow.enhancement (v1).
+    }
+
+    /**
+     * T015 (US1, research R1, FR-001): initiation-v3 embeds the {@code review-gate} callActivity
+     * (T012) right before {@code assemble-package} in a copy of {@code initiation-v2.bpmn20.xml}
+     * ({@code orchestration/src/main/resources/processes/initiation-v3.bpmn20.xml}) — same persona
+     * suite / dependsOn set as v2, PLUS the two gate SUBPROCESS DefinitionAssets.
+     * {@code workflow:initiation-v2} / {@code case_type:initiation} v2.0.0 are left untouched
+     * (Principle I — running v2 cases keep replaying against their pinned snapshot).
+     */
+    private void seedInitiationV3() {
+        List<String> deps = new ArrayList<>();
+        deps.add("workflow:initiation-v3");
+        deps.add("rule:submission-classification");
+        deps.add("SUBPROCESS:subprocess.review-gate");
+        deps.add("SUBPROCESS:subprocess.approval-gate");
+        deps.add("persona:consistency-reviewer");
+        deps.add("prompt:consistency-reviewer-prompt");
+        deps.add("rubric:consistency-reviewer-rubric");
+        for (Persona p : SUITE) {
+            deps.add("persona:" + p.key());
+            deps.add("prompt:" + p.key() + "-prompt");
+            deps.add("rubric:" + p.key() + "-rubric");
+        }
+        String dependsOnJson = deps.stream()
+                .map(d -> "\"" + d + "\"")
+                .reduce((a, b) -> a + "," + b).orElse("");
+
+        seed("case_type", "initiation", V3, """
+                {"name":"Initiation","description":"D2OS Phase 5 Initiation case type with an embedded \
+                governance review gate before delivery",
+                 "dependsOn":[%s]}""".formatted(dependsOnJson));
+        seed("workflow", "initiation-v3", V1, """
+                {"processDefinitionKey":"initiation-v3","engine":"flowable"}""");
+    }
+
+    /**
+     * T015 (US1, research R1, FR-001): assessment-v2 embeds the SAME {@code review-gate} callActivity
+     * used by initiation-v3 (R1: "the same gate is reused across case types by reference, never
+     * re-implemented") right before {@code assemble-package}, in a copy of {@code
+     * assessment-v1.bpmn20.xml}. {@code workflow:assessment} / {@code case_type:assessment} v4.0.0 are
+     * left untouched (Principle I).
+     */
+    private void seedAssessmentV2() {
+        List<String> deps = new ArrayList<>();
+        deps.add("workflow:assessment-v2");
+        deps.add("rule:case-type-classification");
+        deps.add("SUBPROCESS:subprocess.review-gate");
+        deps.add("SUBPROCESS:subprocess.approval-gate");
+        for (Persona p : ASSESSMENT_SUITE) {
+            deps.add("persona:" + p.key());
+            deps.add("prompt:" + p.key() + "-prompt");
+            deps.add("rubric:" + p.key() + "-rubric");
+        }
+        deps.add("template:assessment-findings");
+        deps.add("template:assessment-recommendation");
+        String dependsOnJson = deps.stream()
+                .map(d -> "\"" + d + "\"")
+                .reduce((a, b) -> a + "," + b).orElse("");
+
+        seed("case_type", "assessment", V5, """
+                {"name":"Assessment","description":"D2OS Phase 5 read-only Assessment case type with an \
+                embedded governance review gate before delivery",
+                 "mutating":false,"artifactKindAllowlist":["FINDINGS","RECOMMENDATION"],
+                 "dependsOn":[%s]}""".formatted(dependsOnJson));
+
+        seed("workflow", "assessment-v2", V1, """
+                {"processDefinitionKey":"assessment-v2","engine":"flowable"}""");
     }
 
     private String escape(String s) {

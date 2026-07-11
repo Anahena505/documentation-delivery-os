@@ -80,10 +80,22 @@ public class PersonaExecutionService {
      * advancing. {@code branchId} is the parallel-branch execution id (null for sequential steps).
      */
     public boolean executePersona(UUID caseId, String personaKey, String branchId) {
+        return executePersona(caseId, personaKey, branchId, null);
+    }
+
+    /**
+     * Comment-and-regenerate re-entry overload (Phase 5, T019, research R2): {@code
+     * regenerationComments} is the gate reviewer's REQUEST_CHANGES text, threaded straight through to
+     * {@link ExecutionEnvelopeBuilder#build(UUID, String, String)} so {@link PromptRenderer} injects it
+     * as delimited untrusted data (T1-a). Everything else about the bounded revise loop is identical to
+     * the ordinary path — {@code RegenerationDelegate} (orchestration) is the only caller that passes a
+     * non-null value here.
+     */
+    public boolean executePersona(UUID caseId, String personaKey, String branchId, String regenerationComments) {
         CaseInstance kase = caseInstanceRepository.findById(caseId)
                 .orElseThrow(() -> new NoSuchElementException("case " + caseId));
 
-        PersonaEnvelope envelope = envelopeBuilder.build(caseId, personaKey);
+        PersonaEnvelope envelope = envelopeBuilder.build(caseId, personaKey, regenerationComments);
         String renderedPrompt = promptRenderer.render(envelope);
 
         PersonaInvocation invocation = new PersonaInvocation(
