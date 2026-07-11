@@ -1,5 +1,6 @@
 package com.d2os.casecore;
 
+import com.d2os.tenancy.security.AuthenticatedPrincipal;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -36,6 +37,35 @@ public class AuditWriter {
         String detailsJson = toJson(details);
         auditRepository.save(new AuditEntryRecord(
                 UUID.randomUUID(), workspaceId, subjectType, subjectId, action, actor, detailsJson));
+        outboxRepository.save(new EventOutboxRecord(
+                UUID.randomUUID(), workspaceId, subjectType, subjectId, action, detailsJson));
+    }
+
+    /**
+     * 008 US5 (T051): audit a <b>trust-sensitive decision</b> (gate approve/reject/reopen, catalog
+     * publish, cross-boundary promotion, package grant), additionally stamping the AUTHENTICATED
+     * decision-maker's {@code actor_user_id} and the {@code actor_role} they were authorized under
+     * (FR-013, data-model.md §2). {@code requiredRole} is the role the action is gated on; the stamp
+     * is recorded only if the principal actually holds it (else 403 via {@link
+     * com.d2os.tenancy.security.ActorRoleNotHeldException}).
+     *
+     * <p><b>Default-mode no-op:</b> in the workspace-scoping posture there is no per-user principal,
+     * so {@link AuthenticatedPrincipal#resolveActor} returns empty, both actor columns stay NULL, and
+     * the persisted row + its audit-hash canonicalization are byte-identical to a plain {@link
+     * #record} write — every existing (non-OIDC) integration suite is unaffected. The {@code
+     * event_outbox} row is identical to {@link #record}'s (the projection carries no actor columns).
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordDecision(UUID workspaceId, String subjectType, UUID subjectId, String action,
+                               String actor, String requiredRole, Map<String, Object> details) {
+        AuthenticatedPrincipal.ActorStamp stamp =
+                AuthenticatedPrincipal.resolveActor(requiredRole).orElse(null);
+        String actorUserId = stamp == null ? null : stamp.userId();
+        String actorRole = stamp == null ? null : stamp.role();
+        String detailsJson = toJson(details);
+        auditRepository.save(new AuditEntryRecord(
+                UUID.randomUUID(), workspaceId, subjectType, subjectId, action, actor,
+                actorUserId, actorRole, detailsJson));
         outboxRepository.save(new EventOutboxRecord(
                 UUID.randomUUID(), workspaceId, subjectType, subjectId, action, detailsJson));
     }

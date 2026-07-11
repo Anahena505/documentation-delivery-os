@@ -40,16 +40,40 @@ public class AuditEntryRecord {
     @Column(nullable = false)
     private String details;
 
+    // 008 US5 (T049/T050/T051, data-model.md §2): per-user accountability on trust-sensitive
+    // decisions. Both NULLABLE and additive — pre-existing rows and every default-mode (non-OIDC)
+    // decision leave them null. Distinct from the generic {@code actor} column above, which records
+    // the acting component/persona; these record the AUTHENTICATED individual (IdP `sub`) and the
+    // role they were authorized under (validated to be one they hold, in the service layer).
+    @Column(name = "actor_user_id")
+    private String actorUserId;
+
+    @Column(name = "actor_role")
+    private String actorRole;
+
     protected AuditEntryRecord() {}
 
     public AuditEntryRecord(UUID id, UUID workspaceId, String subjectType, UUID subjectId,
                             String action, String actor, String details) {
+        this(id, workspaceId, subjectType, subjectId, action, actor, null, null, details);
+    }
+
+    /**
+     * Actor-stamped constructor (008 US5, T051). {@code actorUserId}/{@code actorRole} are null in the
+     * default (workspace-scoping) posture, in which case this row is byte-identical, under {@link
+     * com.d2os.casecore.audit.AuditChainCanonicalizer}, to one built by the legacy 7-arg constructor.
+     */
+    public AuditEntryRecord(UUID id, UUID workspaceId, String subjectType, UUID subjectId,
+                            String action, String actor, String actorUserId, String actorRole,
+                            String details) {
         this.id = id;
         this.workspaceId = workspaceId;
         this.subjectType = subjectType;
         this.subjectId = subjectId;
         this.action = action;
         this.actor = actor;
+        this.actorUserId = actorUserId;
+        this.actorRole = actorRole;
         this.details = details;
     }
 
@@ -61,4 +85,6 @@ public class AuditEntryRecord {
     public String getActor() { return actor; }
     public OffsetDateTime getTxTime() { return txTime; }
     public String getDetails() { return details; }
+    public String getActorUserId() { return actorUserId; }
+    public String getActorRole() { return actorRole; }
 }

@@ -250,7 +250,11 @@ public class PublishService {
                     "duplicate (type,key,version): " + draft.getType() + "/" + draft.getKey() + "/" + draft.getVersion(), e);
         }
 
-        auditWriter.record(workspaceId, "definition_asset", draft.getId(), "DEFINITION_PUBLISHED", actor,
+        // 008 US5 (T051): publishing a catalog definition version is a trust-sensitive decision —
+        // stamp the authenticated publisher + catalog-owner role (no-op/NULL in default mode).
+        // "catalog-owner" mirrors d2os.studio.roles.catalog-owner and the endpoint's @PreAuthorize gate.
+        auditWriter.recordDecision(workspaceId, "definition_asset", draft.getId(), "DEFINITION_PUBLISHED",
+                actor, "catalog-owner",
                 Map.of("type", draft.getType(), "key", draft.getKey(), "version", draft.getVersion(),
                         "checksum", recomputedHash, "gateCount", gates.size()));
 

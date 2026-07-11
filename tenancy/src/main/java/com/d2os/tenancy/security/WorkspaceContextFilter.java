@@ -5,6 +5,9 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -21,9 +24,18 @@ import java.util.UUID;
  * the request's actual transaction later used — a real RLS-bypass bug, found via the integration
  * test).
  *
- * <p><b>Primary path (T067):</b> an {@code Authorization: Bearer <jwt>} header, cryptographically
- * verified by {@link JwtService} — signature, issuer, and expiry all checked — with the workspace
- * resolved from the token's {@code workspace_id} claim, never from anything client-asserted.
+ * <p><b>OIDC path (008 US5, T048):</b> when {@code d2os.security.oidc.enabled=true}, Spring
+ * Security's resource-server chain ({@link OidcSecurityConfig}) has already verified the OIDC access
+ * token (RS256/ES256 against the IdP JWKS) and placed a {@link JwtAuthenticationToken} in the
+ * {@link SecurityContextHolder} <i>before</i> this filter runs. In that mode the workspace is
+ * resolved from that verified token's {@code workspace_id} claim and the two default-mode paths below
+ * are not consulted at all. This branch is inert in the default posture, where the security context
+ * holds no {@code JwtAuthenticationToken}.
+ *
+ * <p><b>Primary path (T067, default posture):</b> an {@code Authorization: Bearer <jwt>} header,
+ * cryptographically verified by {@link JwtService} — signature, issuer, and expiry all checked — with
+ * the workspace resolved from the token's {@code workspace_id} claim, never from anything
+ * client-asserted.
  *
  * <p><b>Fallback path (v1 stopgap, T010):</b> an unauthenticated {@code X-Workspace-Id} header.
  * This is accepted ONLY when {@link JwtProperties#allowHeaderWorkspaceFallback()} is {@code true} —
@@ -44,6 +56,8 @@ public class WorkspaceContextFilter extends OncePerRequestFilter {
     private static final String WORKSPACE_HEADER = "X-Workspace-Id";
     private static final String AUTH_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
+    /** OIDC access-token claim carrying the tenant scope (008 US5, T048; contracts/auth-and-rbac.yaml). */
+    private static final String WORKSPACE_CLAIM = "workspace_id";
     /** Actuator health base path (default management base-path {@code /actuator}); covers liveness/readiness sub-paths. */
     private static final String HEALTH_PATH = "/actuator/health";
 
@@ -70,6 +84,30 @@ public class WorkspaceContextFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
+        // 008 US5 (T048) — OIDC path: if the resource-server chain has already authenticated this
+        // request (OIDC mode), resolve the workspace from the VERIFIED token's workspace_id claim and
+        // bypass the default-mode HS256/header paths entirely. In the default posture no
+        // JwtAuthenticationToken is present, so this branch is skipped and behavior is unchanged.
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth instanceof JwtAuthenticationToken jwtAuth) {
+            Object claim = jwtAuth.getToken().getClaims().get(WORKSPACE_CLAIM);
+            if (claim == null || claim.toString().isBlank()) {
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED,
+                        "OIDC token is missing the required workspace_id claim");
+                return;
+            }
+            UUID oidcWorkspaceId;
+            try {
+                oidcWorkspaceId = UUID.fromString(claim.toString());
+            } catch (IllegalArgumentException e) {
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid workspace_id claim");
+                return;
+            }
+            bindAndContinue(oidcWorkspaceId, request, response, chain);
+            return;
+        }
+
+        // ---- Default (workspace-scoping) posture: UNCHANGED from T067/T010 --------------------------
         Optional<UUID> workspaceId = resolveFromBearerToken(request);
 
         if (workspaceId.isEmpty()) {
@@ -86,8 +124,14 @@ public class WorkspaceContextFilter extends OncePerRequestFilter {
             }
         }
 
+        bindAndContinue(workspaceId.get(), request, response, chain);
+    }
+
+    /** Bind the resolved workspace to {@link WorkspaceContext} for the request, then always clear it. */
+    private void bindAndContinue(UUID workspaceId, HttpServletRequest request, HttpServletResponse response,
+                                 FilterChain chain) throws ServletException, IOException {
         try {
-            WorkspaceContext.set(workspaceId.get());
+            WorkspaceContext.set(workspaceId);
             chain.doFilter(request, response);
         } finally {
             WorkspaceContext.clear();

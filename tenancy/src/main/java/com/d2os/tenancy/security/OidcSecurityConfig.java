@@ -3,6 +3,7 @@ package com.d2os.tenancy.security;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -17,15 +18,17 @@ import org.springframework.security.web.SecurityFilterChain;
  * {@code spring.security.oauth2.resourceserver.jwt.*}); {@link RolesJwtConverter} maps the token's
  * roles into authorities and pins {@code sub} as the principal.
  *
- * <p><b>Deferred (not in this additive slice)</b>, because they change behavior the existing
- * integration suites depend on and cannot be verified without a live IdP + a Docker-capable IT run:
- * updating {@link WorkspaceContextFilter} to bind {@code workspace_id} from the OIDC token (T048),
- * populating {@code actor_user_id}/{@code actor_role} into the hash-chained audit records
- * (T050/T051), {@code @PreAuthorize} role gates on the restricted endpoints (T052), and migrating the
- * ~25 existing ITs to mint OIDC test tokens (T053/T054). This class provides the working, opt-in
- * authentication + role-mapping foundation those steps build on.
+ * <p>008 US5 cutover (T048/T050/T051/T052) is now wired: {@link WorkspaceContextFilter} binds
+ * {@code workspace_id} from the verified OIDC token (T048); trust-sensitive decisions stamp
+ * {@code actor_user_id}/{@code actor_role} into the hash-chained audit records (T050/T051); and the
+ * {@code @PreAuthorize} role gates on the restricted endpoints (T052) are enforced by the
+ * {@link EnableMethodSecurity @EnableMethodSecurity} declared HERE — on the OIDC config only, so
+ * those annotations are completely INERT in the default posture (no method-security advisor is
+ * registered when this conditional config is absent), leaving every existing default-mode integration
+ * suite unaffected.
  */
 @Configuration
+@EnableMethodSecurity
 @ConditionalOnProperty(name = "d2os.security.oidc.enabled", havingValue = "true")
 public class OidcSecurityConfig {
 

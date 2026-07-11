@@ -50,4 +50,32 @@ public final class AuthenticatedPrincipal {
   public static boolean hasRole(String role) {
     return roles().contains(role);
   }
+
+  /**
+   * 008 US5 (T051): resolve the actor stamp for a trust-sensitive decision authorized under {@code
+   * requiredRole}, for persistence into {@code audit_entry.actor_user_id}/{@code actor_role}.
+   *
+   * <p>Returns {@link Optional#empty()} in the default (workspace-scoping) posture, where there is no
+   * per-user principal — the caller then leaves both actor columns NULL, exactly as before OIDC, so
+   * default-mode behavior and the audit hash chain are unchanged (see {@code AuditChainCanonicalizer}).
+   *
+   * <p>When a per-user principal IS present (OIDC mode) it MUST hold {@code requiredRole}, otherwise
+   * {@link ActorRoleNotHeldException} (→ 403) — a recorded {@code actor_role} can never be one the
+   * actor does not hold (data-model.md validation rule). For endpoints already gated by
+   * {@code @PreAuthorize} this is a belt-and-suspenders backstop; for any ungated trust-sensitive
+   * writer it is the enforcement point itself.
+   */
+  public static Optional<ActorStamp> resolveActor(String requiredRole) {
+    Optional<String> uid = userId();
+    if (uid.isEmpty()) {
+      return Optional.empty(); // default (non-OIDC) posture: no per-user identity to stamp
+    }
+    if (!hasRole(requiredRole)) {
+      throw new ActorRoleNotHeldException(uid.get(), requiredRole);
+    }
+    return Optional.of(new ActorStamp(uid.get(), requiredRole));
+  }
+
+  /** The authenticated individual + the role they were authorized under, for an audit actor stamp. */
+  public record ActorStamp(String userId, String role) {}
 }

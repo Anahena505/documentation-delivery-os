@@ -8,6 +8,7 @@ import com.d2os.governance.GateService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -80,7 +81,17 @@ public class GateController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    /** APPROVE / REJECT / REQUEST_CHANGES only (Q4) — REQUEST_CHANGES requires non-blank comments. */
+    /**
+     * APPROVE / REJECT / REQUEST_CHANGES only (Q4) — REQUEST_CHANGES requires non-blank comments.
+     *
+     * <p>008 US5 (T052, contracts/auth-and-rbac.yaml): role-restricted to a governance-approver.
+     * The {@code @PreAuthorize} is INERT in the default posture — method security is enabled only by
+     * {@link com.d2os.tenancy.security.OidcSecurityConfig}'s {@code @EnableMethodSecurity}, which is
+     * active only when {@code d2os.security.oidc.enabled=true} — so existing (default-mode) tests and
+     * deployments are unaffected; in OIDC mode an authenticated caller lacking {@code ROLE_approver}
+     * gets 403.
+     */
+    @PreAuthorize("hasRole('approver')")
     @PostMapping("/{gateId}/decision")
     public ResponseEntity<GateSummary> decide(@PathVariable UUID gateId,
                                               @RequestHeader(value = "X-Actor", defaultValue = "reviewer") String actor,

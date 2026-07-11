@@ -55,6 +55,11 @@ dependencies {
     testImplementation project(':test-support')
     testImplementation platform('software.amazon.awssdk:bom:2.28.29')
     testImplementation 'software.amazon.awssdk:s3'
+    // 008 US5 (T053/T054): mint & verify RS256 OIDC test tokens for the resource-server path
+    // (RbacAndActorIT boots in OIDC mode). The starter brings spring-security-oauth2-jose +
+    // Nimbus (SignedJWT/RSASSASigner/RSAKey) and NimbusJwtDecoder for the test JwtDecoder bean.
+    // BOM-managed — no version. Test-scope only, so it never changes the app's default runtime posture.
+    testImplementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     // TestRestTemplate's default JDK HttpURLConnection throws HttpRetryException instead of
     // surfacing a 401 on a streamed POST; Apache HttpClient (auto-detected) handles it.
     testImplementation 'org.apache.httpcomponents.client5:httpclient5'

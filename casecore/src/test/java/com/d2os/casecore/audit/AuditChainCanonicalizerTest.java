@@ -108,4 +108,61 @@ class AuditChainCanonicalizerTest {
         assertNotEquals(baseline, AuditChainCanonicalizer.canonicalize(List.of(tampered)),
                 "changing the transaction time must change the canonical bytes");
     }
+
+    // --- 008 US5 (T050): the additive actor_user_id / actor_role fields fold into the seal ---------
+
+    /**
+     * NON-REGRESSION: an entry whose actor fields are both null (every pre-008 row and every
+     * default-mode decision) MUST canonicalize to exactly the pre-008 bytes, so existing seals/hashes
+     * stay valid. We prove it structurally: the null-actor canonical form is the legacy line VERBATIM
+     * (the with-actor form is that same legacy line plus an appended {@code |userId|role} suffix), so
+     * adding the fields never perturbs a null-actor entry.
+     */
+    @Test
+    void nullActors_keepLegacyCanonicalBytesUnchanged() {
+        String nullActor = AuditChainCanonicalizer.canonicalize(List.of(sample())); // both actor fields null
+
+        AuditEntryRecord withActor = sample();
+        setField(withActor, "actorUserId", "sub-abc-123");
+        setField(withActor, "actorRole", "approver");
+        String withActorStr = AuditChainCanonicalizer.canonicalize(List.of(withActor));
+
+        // The legacy line (minus its trailing newline) is preserved verbatim as the prefix of the
+        // actor-stamped line — i.e. null actors add nothing to the canonical bytes.
+        String legacyLine = nullActor.substring(0, nullActor.length() - 1); // drop trailing '\n'
+        org.junit.jupiter.api.Assertions.assertTrue(withActorStr.startsWith(legacyLine),
+                "a null-actor entry must canonicalize to exactly the legacy (pre-008) bytes");
+        assertNotEquals(nullActor, withActorStr,
+                "stamping a non-null actor must change the canonical bytes (tamper-evidence)");
+    }
+
+    @Test
+    void tamperingActorUserId_changesCanonicalBytes() {
+        AuditEntryRecord stamped = sample();
+        setField(stamped, "actorUserId", "sub-abc-123");
+        setField(stamped, "actorRole", "approver");
+        String baseline = AuditChainCanonicalizer.canonicalize(List.of(stamped));
+
+        AuditEntryRecord tampered = sample();
+        setField(tampered, "actorUserId", "sub-evil-999");
+        setField(tampered, "actorRole", "approver");
+
+        assertNotEquals(baseline, AuditChainCanonicalizer.canonicalize(List.of(tampered)),
+                "altering the authenticated actor's user id must break the seal (FR-013, SC-008)");
+    }
+
+    @Test
+    void tamperingActorRole_changesCanonicalBytes() {
+        AuditEntryRecord stamped = sample();
+        setField(stamped, "actorUserId", "sub-abc-123");
+        setField(stamped, "actorRole", "approver");
+        String baseline = AuditChainCanonicalizer.canonicalize(List.of(stamped));
+
+        AuditEntryRecord tampered = sample();
+        setField(tampered, "actorUserId", "sub-abc-123");
+        setField(tampered, "actorRole", "catalog-owner");
+
+        assertNotEquals(baseline, AuditChainCanonicalizer.canonicalize(List.of(tampered)),
+                "altering the role a decision was made under must break the seal (FR-013, SC-008)");
+    }
 }

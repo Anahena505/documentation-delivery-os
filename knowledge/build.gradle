@@ -12,4 +12,9 @@ dependencies {
     implementation project(':observability')
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // 008 US5 (T052): @PreAuthorize role gate on CandidateController.d4 (promotion-approver).
+    // Annotation from spring-security-core; enforced only in OIDC mode (OidcSecurityConfig), inert
+    // otherwise. BOM-managed — no version.
+    implementation 'org.springframework.security:spring-security-core'
 }

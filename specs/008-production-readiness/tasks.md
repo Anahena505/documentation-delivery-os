@@ -299,7 +299,7 @@ record names the user + role.
 - [X] T047 [US5] Create `tenancy/src/main/java/com/d2os/tenancy/security/AuthenticatedPrincipal.java` —
   a small helper reading the current `SecurityContext` to expose `userId()` (JWT `sub`) and
   `roles()`. Acceptance: compiles; unit-testable with a mocked `SecurityContext`.
-- [ ] T048 [US5] Update `tenancy/src/main/java/com/d2os/tenancy/security/WorkspaceContextFilter.java`:
+- [X] T048 [US5] Update `tenancy/src/main/java/com/d2os/tenancy/security/WorkspaceContextFilter.java`:
   resolve `workspace_id` from the validated OIDC JWT (via `JwtAuthenticationToken` claims) instead of
   the local HS256 `JwtService`; REMOVE the `X-Workspace-Id` header-fallback branch and the
   `allowHeaderWorkspaceFallback` property usage. Keep binding `WorkspaceContext` exactly as today.
@@ -309,25 +309,25 @@ record names the user + role.
   and `actor_role text` to the audit/decision tables that record gate approvals, rejections, reopens,
   and package grants (per data-model.md §2). Nullable so pre-existing rows remain valid. Acceptance:
   SQL valid.
-- [ ] T050 [US5] Include the actor fields in the hash chain: in
+- [X] T050 [US5] Include the actor fields in the hash chain: in
   `casecore/src/main/java/com/d2os/casecore/audit/AuditChainCanonicalizer.java` add
   `actor_user_id` and `actor_role` to the canonical form so altering "who decided" breaks the seal.
   Update `AuditChainCanonicalizerTest` (T008) to assert actor sensitivity. Acceptance:
   `:casecore:test --tests AuditChainCanonicalizerTest` passes.
-- [ ] T051 [US5] Populate the actor fields when writing decisions: in the services that record gate
+- [X] T051 [US5] Populate the actor fields when writing decisions: in the services that record gate
   decisions/reopens/grants (governance + casecore writers), read `AuthenticatedPrincipal.userId()` and
   the acting role and persist them; validate the acting role is one the principal holds (reject
   otherwise). Acceptance: compiles; a decision row carries actor values.
-- [ ] T052 [P] [US5] Add `@PreAuthorize("hasRole('...')")` to the role-restricted controller methods
+- [X] T052 [P] [US5] Add `@PreAuthorize("hasRole('...')")` to the role-restricted controller methods
   named in `contracts/auth-and-rbac.yaml`: gate decision (governance approver), catalog publish
   (`catalog-owner`), knowledge promotion (promotion approver). Enable method security with
   `@EnableMethodSecurity` in `SecurityConfig`. Acceptance: compiles.
-- [ ] T053 [US5] Update existing ITs to authenticate via a test OIDC token: add a test JWKS + a helper
+- [X] T053 [US5] Update existing ITs to authenticate via a test OIDC token: add a test JWKS + a helper
   that mints RS256 tokens with `sub`, `workspace_id`, and `roles` claims (mirror the existing
   `JwtWorkspaceAuthIT` approach but for the resource-server path); point the resource server at the
   test JWKS via `@DynamicPropertySource`. Replace `X-Workspace-Id` header usage in test support.
   Acceptance: `:app:compileTestJava` passes.
-- [ ] T054 [US5] Create `app/src/test/java/com/d2os/app/RbacAndActorIT.java`: (a) role-restricted call
+- [X] T054 [US5] Create `app/src/test/java/com/d2os/app/RbacAndActorIT.java`: (a) role-restricted call
   without the role → 403; (b) with the role → 200 and the persisted audit record has `actor_user_id`
   + `actor_role`; (c) tamper the actor and confirm `AuditChainVerifier` reports a break. Acceptance:
   compiles; runs in CI.

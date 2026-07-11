@@ -146,7 +146,11 @@ public class GateService {
         }
         gateInstanceRepository.save(gate);
 
-        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), decisionType, actorId,
+        // 008 US5 (T051): stamp the authenticated approver + role onto the audit row (no-op/NULL in
+        // default mode). "approver" mirrors the governance-approver role the /gates/{id}/decision
+        // endpoint is @PreAuthorize-gated on (T052, contracts/auth-and-rbac.yaml).
+        auditWriter.recordDecision(gate.getWorkspaceId(), "gate_instance", gate.getId(), decisionType,
+                actorId, "approver",
                 Map.of("verb", verb.name(), "comments", comments == null ? "" : comments));
 
         gateEventPublisher.publishDecided(gate, verb, actorId, decisionId);

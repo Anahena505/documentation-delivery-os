@@ -120,7 +120,10 @@ public class ReopenService {
         attachDeltaReport(gate, candidate);
         gateInstanceRepository.save(gate);
 
-        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_REOPEN", actorId,
+        // 008 US5 (T051): a reopen is a trust-sensitive decision (FR-013) — stamp the authenticated
+        // actor + governance-approver role (no-op/NULL in default mode).
+        auditWriter.recordDecision(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_REOPEN",
+                actorId, "approver",
                 Map.of("candidateId", candidate.getId().toString(), "depth", candidate.getDepth()));
 
         candidate.markDisposition(GateReopenCandidate.Disposition.REOPENED);

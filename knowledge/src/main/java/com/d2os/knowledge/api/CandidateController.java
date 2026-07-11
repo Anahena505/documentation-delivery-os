@@ -16,6 +16,7 @@ import com.d2os.knowledge.capture.RedactionService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -113,6 +114,15 @@ public class CandidateController {
         }
     }
 
+    /**
+     * 008 US5 (T052, contracts/auth-and-rbac.yaml {@code /knowledge/promote}): the D4 cross-boundary
+     * promotion decision is restricted to a {@code promotion-approver}. The {@code @PreAuthorize} is
+     * inert in the default posture (method security is enabled only by {@link
+     * com.d2os.tenancy.security.OidcSecurityConfig} in OIDC mode), so existing tests are unaffected;
+     * in OIDC mode a caller lacking {@code ROLE_promotion-approver} gets 403. The pre-existing D4
+     * self-approval / workspace-owner checks in {@link PromotionGateService} remain in force on top.
+     */
+    @PreAuthorize("hasRole('promotion-approver')")
     @PostMapping("/{candidateId}/d4")
     public ResponseEntity<D4Response> d4(@PathVariable UUID candidateId,
                                          @RequestHeader(value = "X-Actor", defaultValue = "owner") String actor,

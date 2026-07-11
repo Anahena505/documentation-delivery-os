@@ -2,6 +2,7 @@ package com.d2os.studio;
 
 import com.d2os.tenancy.WorkspaceContext;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -42,7 +43,15 @@ public class PublishController {
         return ResponseEntity.ok(result);
     }
 
-    /** {@code POST /catalog/drafts/{draftId}/publish} (T018, FR-006/007/008/017/018). */
+    /**
+     * {@code POST /catalog/drafts/{draftId}/publish} (T018, FR-006/007/008/017/018).
+     *
+     * <p>008 US5 (T052, contracts/auth-and-rbac.yaml): restricted to a {@code catalog-owner}. The
+     * {@code @PreAuthorize} is inert in the default posture (method security is enabled only by
+     * {@link com.d2os.tenancy.security.OidcSecurityConfig} in OIDC mode), so existing tests are
+     * unaffected; in OIDC mode a caller lacking {@code ROLE_catalog-owner} gets 403.
+     */
+    @PreAuthorize("hasRole('catalog-owner')")
     @PostMapping("/{draftId}/publish")
     public ResponseEntity<PublishService.PublishResult> publish(
             @PathVariable UUID draftId,

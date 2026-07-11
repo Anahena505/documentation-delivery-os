@@ -162,8 +162,11 @@ public class PromotionGateService {
                 approver, rationale, candidate.getId().toString()));
         savePass(candidate, rootId(candidate), PromotionGateRecord.Gate.D4, approver, decisionId,
                 "D4 approved; published item " + itemId);
-        auditWriter.record(candidate.getWorkspaceId(), "capture_candidate", candidate.getId(),
-                "PUBLISHED", approver,
+        // 008 US5 (T051): D4 approval is the cross-boundary promotion into the shared library
+        // (FR-013) — stamp the authenticated approver + promotion-approver role (no-op/NULL in default
+        // mode). "promotion-approver" mirrors the /d4 endpoint's @PreAuthorize gate (T052).
+        auditWriter.recordDecision(candidate.getWorkspaceId(), "capture_candidate", candidate.getId(),
+                "PUBLISHED", approver, "promotion-approver",
                 Map.of("gate", "D4", "outcome", "APPROVE", "knowledgeItemId", itemId.toString(),
                         "scopeLevel", scope.name()));
 

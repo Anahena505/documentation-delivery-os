@@ -42,8 +42,11 @@ public class PackageAccessService {
     public PackageAccessGrant grant(UUID workspaceId, UUID packageId, String role, String grantedBy) {
         PackageAccessGrant grant = new PackageAccessGrant(UUID.randomUUID(), workspaceId, packageId, role, grantedBy);
         grantRepository.save(grant);
-        auditWriter.record(workspaceId, "execution_package", packageId, "PACKAGE_ACCESS_GRANTED", grantedBy,
-                Map.of("role", role));
+        // 008 US5 (T051): a package grant is a trust-sensitive decision (FR-013) — stamp the
+        // authenticated granter + the approver role they act under (no-op/NULL in default mode; the
+        // system-seeded participant grant runs with no per-user principal, so it stays unstamped).
+        auditWriter.recordDecision(workspaceId, "execution_package", packageId, "PACKAGE_ACCESS_GRANTED",
+                grantedBy, "approver", Map.of("role", role));
         return grant;
     }
 

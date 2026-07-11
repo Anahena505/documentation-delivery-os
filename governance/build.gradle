@@ -28,4 +28,9 @@ dependencies {
     // engine-agnostic and does not depend on observability — micrometer-core (home of MeterRegistry/
     // Gauge) is added directly; the MeterRegistry bean itself is provided by the app at runtime.
     implementation 'io.micrometer:micrometer-core'
+
+    // 008 US5 (T052): @PreAuthorize role gate on GateController.decide (governance-approver). The
+    // annotation lives in spring-security-core; it is enforced only in OIDC mode (method security is
+    // enabled by OidcSecurityConfig) and inert otherwise. BOM-managed — no version.
+    implementation 'org.springframework.security:spring-security-core'
 }
