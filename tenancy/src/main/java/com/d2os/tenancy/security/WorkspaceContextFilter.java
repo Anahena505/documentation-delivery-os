@@ -32,6 +32,11 @@ import java.util.UUID;
  * JWT (the header path is provably unreachable unless explicitly opted into) while every existing
  * integration test — authored before JWT support existed, and asserting business logic, not auth —
  * keeps passing unchanged.
+ *
+ * <p><b>Health probes bypass the filter entirely</b> (see {@link #shouldNotFilter}): actuator
+ * health/liveness/readiness endpoints carry no tenant data, and under the production no-fallback
+ * posture a workspace-less probe would otherwise get 401 — making an orchestrator consider a
+ * perfectly healthy app down.
  */
 @Component
 public class WorkspaceContextFilter extends OncePerRequestFilter {
@@ -39,6 +44,8 @@ public class WorkspaceContextFilter extends OncePerRequestFilter {
     private static final String WORKSPACE_HEADER = "X-Workspace-Id";
     private static final String AUTH_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
+    /** Actuator health base path (default management base-path {@code /actuator}); covers liveness/readiness sub-paths. */
+    private static final String HEALTH_PATH = "/actuator/health";
 
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
@@ -46,6 +53,18 @@ public class WorkspaceContextFilter extends OncePerRequestFilter {
     public WorkspaceContextFilter(JwtService jwtService, JwtProperties jwtProperties) {
         this.jwtService = jwtService;
         this.jwtProperties = jwtProperties;
+    }
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        // Never gate infrastructure health probes on a workspace-scoping JWT — they are tenant-agnostic,
+        // and gating them would 401 healthy instances under the production no-fallback posture.
+        String path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        return path.equals(HEALTH_PATH) || path.startsWith(HEALTH_PATH + "/");
     }
 
     @Override
