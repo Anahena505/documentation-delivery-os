@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://d2os.com/bpmn"
+             id="d2os-enhancement-v1-definitions">
+
+  <!--
+    Enhancement workflow v1 (T020, US3, research R4/R7). Anchors every produced artifact to a
+    Feature's prior DELIVERED baseline via DERIVES_FROM trace links -- the baseline is REFERENCED,
+    never re-authored or copied.
+
+    Shape (R7, T020): baseline-resolution delegate (BaselineResolutionDelegate, the literal FIRST
+    step -- resolves the Feature's most recent Delivered Case's pinned ArtifactRevisions and records
+    them as a durable BASELINE_RESOLVED audit entry, T023) -> delta-analysis personas
+    (requirements-delta-analyst, design-delta-analyst -- baseline supplied as read-only delimited data
+    via BaselineContextPort) -> delta-doc consolidator -> impact-analysis persona (the artifact whose
+    charter is to reason over the baseline's DERIVES_FROM/SATISFIES edges) -> rubric gates (the
+    existing per-persona validation pipeline inside PersonaExecutionService -- no separate BPMN step,
+    same as assessment-v1.bpmn20.xml/initiation-v2.bpmn20.xml) -> package assembly (each produced
+    ArtifactRevision gets its own DERIVES_FROM trace_link to every pinned baseline revision, written in
+    the SAME transaction as that revision row -- see ArtifactService#linkToBaseline, T023) -> deliver.
+
+    Shape decision (research R7): unlike Assessment's subject-analysis personas, which R7 explicitly
+    calls "parallel where independent" (AssessmentSubjectAnalysisDelegate's app-level fan-out), R7
+    describes Enhancement's delta-analysis personas WITHOUT that qualifier. This workflow therefore
+    runs the delta-analysis suite SEQUENTIALLY via the same plain personaStepDelegate every sequential
+    persona step in this codebase already uses -- zero new fan-out/escalation-bridge machinery, in
+    keeping with R7's own rationale ("zero new execution machinery... reusing PersonaStepDelegate").
+    A future revision could parallelize this suite the same way AssessmentSubjectAnalysisDelegate does,
+    if independence between the two delta analysts is established later; nothing here forecloses that.
+
+    Activity ids ARE persona keys (T008 convention, matches assessment-v1.bpmn20.xml), and these exact
+    keys are what CatalogSeedLoader.seedEnhancement() (T021/T022) publishes personas/prompts/rubrics
+    under.
+  -->
+  <process id="enhancement-v1" name="Enhancement Case (baseline-anchored)" isExecutable="true">
+
+    <startEvent id="start"/>
+    <sequenceFlow id="s0" sourceRef="start" targetRef="baseline-resolution"/>
+
+    <serviceTask id="baseline-resolution" name="Resolve Delivered Baseline"
+                 flowable:async="true" flowable:delegateExpression="${baselineResolutionDelegate}"/>
+    <sequenceFlow id="s1" sourceRef="baseline-resolution" targetRef="requirements-delta-analyst"/>
+
+    <serviceTask id="requirements-delta-analyst" name="Requirements Delta Analysis"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s2" sourceRef="requirements-delta-analyst" targetRef="design-delta-analyst"/>
+
+    <serviceTask id="design-delta-analyst" name="Design Delta Analysis"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s3" sourceRef="design-delta-analyst" targetRef="delta-doc"/>
+
+    <serviceTask id="delta-doc" name="Delta Document Consolidation"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s4" sourceRef="delta-doc" targetRef="impact-analysis"/>
+
+    <serviceTask id="impact-analysis" name="Impact Analysis"
+                 flowable:async="true" flowable:delegateExpression="${personaStepDelegate}"/>
+    <sequenceFlow id="s5" sourceRef="impact-analysis" targetRef="assemble-package"/>
+
+    <serviceTask id="assemble-package" name="Assemble Package"
+                 flowable:async="true" flowable:delegateExpression="${assemblePackageDelegate}"/>
+    <sequenceFlow id="s6" sourceRef="assemble-package" targetRef="end"/>
+
+    <endEvent id="end"/>
+  </process>
+</definitions>

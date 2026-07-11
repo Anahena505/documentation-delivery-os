@@ -150,7 +150,7 @@ class KnowledgeReplayIT {
         PersonaEnvelope envelope = new PersonaEnvelope(
                 caseId, "risk-governance-officer", UUID.randomUUID(), "1.0.0",
                 UUID.randomUUID(), "1.0.0", "template", UUID.randomUUID(), "1.0.0", "{}",
-                "{\"description\":\"x\"}", injected, 10, List.of(), null);
+                "{\"description\":\"x\"}", injected, 10, List.of(), null, List.of());
 
         WorkspaceContext.set(WORKSPACE_ID);
         var execution = operationExecutionRecorder.record(

@@ -132,6 +132,12 @@ public class SubmissionController {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
     }
 
+    /** T024/US3: an ENHANCEMENT confirm with no identifiable/no Delivered baseline → 422 (research R4). */
+    @ExceptionHandler(NoBaselineException.class)
+    public ResponseEntity<String> onNoBaseline(NoBaselineException e) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(e.getMessage());
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<String> onNotFound(NoSuchElementException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());

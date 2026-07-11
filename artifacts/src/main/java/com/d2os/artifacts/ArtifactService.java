@@ -1,11 +1,15 @@
 package com.d2os.artifacts;
 
 import com.d2os.artifacts.spi.PersonaOutputPort;
+import com.d2os.casecore.AuditEntryRecord;
+import com.d2os.casecore.AuditEntryRepository;
 import com.d2os.casecore.AuditWriter;
 import com.d2os.casecore.CaseDefinitionSnapshot;
 import com.d2os.casecore.CaseDefinitionSnapshotRepository;
 import com.d2os.casecore.CaseTypeCapability;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,28 +44,38 @@ public class ArtifactService {
     private final PersonaOutputPort personaOutputPort;
     private final CaseDefinitionSnapshotRepository snapshotRepository;
     private final AuditWriter auditWriter;
+    private final AuditEntryRepository auditEntryRepository;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbcTemplate;
 
     public ArtifactService(ArtifactRepository artifactRepository,
                            ArtifactRevisionRepository revisionRepository,
                            PersonaOutputPort personaOutputPort,
                            CaseDefinitionSnapshotRepository snapshotRepository,
                            AuditWriter auditWriter,
-                           ObjectMapper objectMapper) {
+                           AuditEntryRepository auditEntryRepository,
+                           ObjectMapper objectMapper,
+                           JdbcTemplate jdbcTemplate) {
         this.artifactRepository = artifactRepository;
         this.revisionRepository = revisionRepository;
         this.personaOutputPort = personaOutputPort;
         this.snapshotRepository = snapshotRepository;
         this.auditWriter = auditWriter;
+        this.auditEntryRepository = auditEntryRepository;
         this.objectMapper = objectMapper;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
     public List<ArtifactRevision> materializeForCase(UUID workspaceId, UUID caseId) {
         List<ArtifactRevision> revisions = new ArrayList<>();
+        // Phase 5 (T023, US3, research R4): resolved once per case, not per persona output — Enhancement's
+        // BaselineResolutionDelegate records this as a BASELINE_RESOLVED audit entry (empty/absent for
+        // every non-Enhancement case, so this is a no-op list read for them).
+        List<UUID> baselineRevisionIds = baselineRevisionIdsFor(caseId);
         for (PersonaOutputPort.ValidatedOutput output : personaOutputPort.validatedOutputsForCase(caseId)) {
             String kind = deriveArtifactKind(output.personaKey());
-            createRevision(workspaceId, caseId, caseId, output, kind).ifPresent(revisions::add);
+            createRevision(workspaceId, caseId, caseId, output, kind, baselineRevisionIds).ifPresent(revisions::add);
         }
         return revisions;
     }
@@ -84,6 +98,23 @@ public class ArtifactService {
     @Transactional
     public Optional<ArtifactRevision> createRevision(UUID workspaceId, UUID ownerCaseId, UUID targetCaseId,
             PersonaOutputPort.ValidatedOutput output, String artifactKind) {
+        return createRevision(workspaceId, ownerCaseId, targetCaseId, output, artifactKind, List.of());
+    }
+
+    /**
+     * Phase 5 (T023, US3, research R4) overload: {@code baselineRevisionIds} is the Enhancement case's
+     * pinned baseline ArtifactRevision ids (empty for every other case type). When non-empty AND a NEW
+     * ArtifactRevision row is actually persisted below (either a brand-new Artifact's revision 1, or an
+     * appended revision — never on the idempotent "unchanged content" early-return, which persists no
+     * new row), one {@code DERIVES_FROM} trace_link edge is written per baseline revision id, in this
+     * SAME {@code @Transactional} method call — i.e. the same transaction as the artifact row (R4's
+     * explicit requirement; see {@code orchestration}'s {@code BaselineResolutionDelegate} javadoc for
+     * why the linking happens HERE, at artifact-creation time, rather than when the baseline is first
+     * resolved).
+     */
+    @Transactional
+    public Optional<ArtifactRevision> createRevision(UUID workspaceId, UUID ownerCaseId, UUID targetCaseId,
+            PersonaOutputPort.ValidatedOutput output, String artifactKind, List<UUID> baselineRevisionIds) {
         CaseTypeCapability.Capability capability = capabilityFor(ownerCaseId);
         if (!capability.mutating()) {
             boolean crossCase = !targetCaseId.equals(ownerCaseId);
@@ -114,7 +145,9 @@ public class ArtifactService {
             ArtifactRevision revision = new ArtifactRevision(
                     UUID.randomUUID(), workspaceId, artifact.getId(), nextRevisionNo,
                     output.storageRef(), output.contentHash(), output.operationExecutionId());
-            return Optional.of(revisionRepository.save(revision));
+            ArtifactRevision saved = revisionRepository.save(revision);
+            linkToBaseline(workspaceId, saved.getId(), baselineRevisionIds);
+            return Optional.of(saved);
         }
 
         Artifact artifact = new Artifact(
@@ -128,7 +161,50 @@ public class ArtifactService {
         ArtifactRevision revision = new ArtifactRevision(
                 UUID.randomUUID(), workspaceId, artifact.getId(), 1,
                 output.storageRef(), output.contentHash(), output.operationExecutionId());
-        return Optional.of(revisionRepository.save(revision));
+        ArtifactRevision saved = revisionRepository.save(revision);
+        linkToBaseline(workspaceId, saved.getId(), baselineRevisionIds);
+        return Optional.of(saved);
+    }
+
+    /**
+     * Write one {@code DERIVES_FROM} trace_link edge from {@code newRevisionId} to each id in {@code
+     * baselineRevisionIds} (research R4). Raw {@code JdbcTemplate} insert — same idiom as {@code
+     * ConsistencyService#writeConflictEdge}, the only other {@code trace_link} writer in this codebase
+     * (no JPA entity exists for {@code trace_link}). No-op when {@code baselineRevisionIds} is empty
+     * (every non-Enhancement case).
+     */
+    private void linkToBaseline(UUID workspaceId, UUID newRevisionId, List<UUID> baselineRevisionIds) {
+        for (UUID baselineRevisionId : baselineRevisionIds) {
+            jdbcTemplate.update(
+                    "INSERT INTO trace_link (workspace_id, from_type, from_id, to_type, to_id, link_type) "
+                            + "VALUES (?, 'artifact_revision', ?, 'artifact_revision', ?, 'DERIVES_FROM')",
+                    workspaceId, newRevisionId, baselineRevisionId);
+        }
+    }
+
+    /**
+     * Read back the Enhancement case's {@code BASELINE_RESOLVED} audit entry ({@link
+     * BaselineResolutionDelegate}, T023) as the list of pinned baseline ArtifactRevision ids. Empty for
+     * any case with no such entry (every non-Enhancement case, or an Enhancement case whose baseline
+     * step hasn't run yet).
+     */
+    private List<UUID> baselineRevisionIdsFor(UUID caseId) {
+        return auditEntryRepository
+                .findFirstBySubjectTypeAndSubjectIdAndActionOrderByTxTimeDesc(
+                        "case_instance", caseId, "BASELINE_RESOLVED")
+                .map(this::parseBaselineRevisionIds)
+                .orElse(List.of());
+    }
+
+    private List<UUID> parseBaselineRevisionIds(AuditEntryRecord entry) {
+        try {
+            JsonNode revisions = objectMapper.readTree(entry.getDetails()).path("revisions");
+            List<UUID> ids = new ArrayList<>();
+            revisions.forEach(r -> ids.add(UUID.fromString(r.path("revisionId").asText())));
+            return ids;
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     private void refuse(UUID workspaceId, UUID ownerCaseId, UUID targetCaseId,
