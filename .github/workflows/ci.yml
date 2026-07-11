@@ -1,0 +1,59 @@
+# D2OS Continuous Integration (feature 008, T012 / enhancement E1).
+#
+# Runs on every pull request and on every push to `main`. One job on ubuntu-latest that:
+#   1. builds + runs the whole test suite via `./gradlew build` — this executes the fast JUnit unit
+#      layer, the Testcontainers integration suites (*IT), AND the ArchUnit boundary rules (they are
+#      wired as ordinary tests, so `build` runs them).
+#   2. produces JaCoCo coverage reports.
+#   3. uploads all build reports (test + coverage + static analysis) as an artifact for inspection.
+#
+# FAIL-CLOSED CONTRACT (important):
+# GitHub's ubuntu-latest runner ships a real, running Docker daemon, so the Testcontainers ITs
+# genuinely start Postgres/MinIO containers and execute here — this is the environment the local
+# sandbox lacks. Testcontainers is configured to REQUIRE a Docker daemon: if Docker were ever
+# unavailable, the integration step MUST FAIL (a hard error), it MUST NOT be silently skipped.
+# Verification gates fail closed — a green run means the ITs actually ran, never that they were
+# quietly bypassed. Do not add `continue-on-error`, a Docker-availability guard, or any
+# skip-when-no-docker fallback to the build step below.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build, test (unit + Testcontainers IT + ArchUnit) & coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # `build` runs the fast unit tests, the Testcontainers integration suites (they need the
+      # runner's Docker daemon — present on ubuntu-latest), and the ArchUnit rules. If Docker were
+      # missing the ITs fail here rather than skipping (fail-closed — see header).
+      - name: Build (unit + integration + ArchUnit)
+        run: ./gradlew build
+
+      - name: JaCoCo coverage report
+        run: ./gradlew jacocoTestReport
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: '**/build/reports/**'
+          if-no-files-found: warn

@@ -110,14 +110,14 @@ green; the unit tests run without Docker.
 
 ### Implementation (CI)
 
-- [ ] T012 [US1] Create `.github/workflows/ci.yml`. Triggers: `pull_request` and `push` to `main`.
+- [X] T012 [US1] Create `.github/workflows/ci.yml`. Triggers: `pull_request` and `push` to `main`.
   One job on `ubuntu-latest`, JDK 21 (`actions/setup-java@v4`, temurin), Gradle cache
   (`gradle/actions/setup-gradle@v4`). Steps: `./gradlew build` (runs unit + integration + ArchUnit),
   then `./gradlew jacocoTestReport`, then upload `**/build/reports/**` via `actions/upload-artifact@v4`.
   The runner provides Docker, so Testcontainers ITs execute. Add a comment noting: if Docker is
   unavailable the integration step MUST fail, not skip (fail-closed). Acceptance: YAML is valid
   (`python -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"`).
-- [ ] T013 [US1] Create `.github/workflows/nightly.yml`. Trigger: `schedule` (cron `0 3 * * *`) +
+- [X] T013 [US1] Create `.github/workflows/nightly.yml`. Trigger: `schedule` (cron `0 3 * * *`) +
   `workflow_dispatch`. Job runs `./gradlew test -PincludeSlow=true` (or the project's `slowTest` task
   if present) so `@Tag("slow")` benchmark ITs run. Acceptance: YAML valid.
 - [ ] T014 [US1] Run the whole fast unit layer to confirm the pyramid base is green:
@@ -393,11 +393,11 @@ results; DR rehearsal restores the real schema and passes integrity checks.
 - [ ] T062 [P] [US7] Ensure the two benchmark ITs are `@Tag("slow")` and included by `nightly.yml`
   (T013): check `app/src/test/java/com/d2os/app/TraceabilityBenchmarkIT.java` and the
   `ResolutionBenchmarkIT` carry the tag; add if missing. Acceptance: `:app:compileTestJava` passes.
-- [ ] T063 [P] [US7] Create `ops/dr-rehearsal.sh` — a script that stands up the real Flyway schema on a
+- [X] T063 [P] [US7] Create `ops/dr-rehearsal.sh` — a script that stands up the real Flyway schema on a
   scratch Postgres, restores from a base backup + WAL per `ops/dr-drill.md`, then runs
   `AuditChainVerifier` and a smoke case check against the restored instance (per FR-017). Acceptance:
   script is syntactically valid (`bash -n ops/dr-rehearsal.sh`).
-- [ ] T064 [P] [US7] Create `ops/backup-verification.md` describing (and, where scriptable in
+- [X] T064 [P] [US7] Create `ops/backup-verification.md` describing (and, where scriptable in
   `ops/backup-verify.sh`) a scheduled job that restores the latest base backup into a scratch instance
   and runs `AuditChainVerifier` automatically. Acceptance: doc present; script (if added) passes
   `bash -n`.
@@ -408,10 +408,10 @@ results; DR rehearsal restores the real schema and passes integrity checks.
 
 ## Phase 10: Polish & Cross-Cutting
 
-- [ ] T065 [P] Create a root `README.md`: what D2OS is, the 15-module map, a `docker compose up` +
+- [X] T065 [P] Create a root `README.md`: what D2OS is, the 15-module map, a `docker compose up` +
   `bootRun` quickstart, the env-var surface (link `.env.example`), and the test tiers (unit vs
   Testcontainers ITs vs `@Tag("slow")`). Acceptance: file present, links resolve.
-- [ ] T066 [P] Create `CLAUDE.md` at repo root capturing the conventions in this file's header (system
+- [X] T066 [P] Create `CLAUDE.md` at repo root capturing the conventions in this file's header (system
   Gradle path, global Flyway V-namespace, additive-within-module rule, SPI dependency-inversion
   pattern) so future contributors/agents inherit them. Acceptance: file present.
 - [ ] T067 [P] Update `docs/enhancement-plan.md` to mark the E1–E14 items now delivered by this
