@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -31,11 +32,22 @@ import java.util.UUID;
 @Component
 public class ExecutionEnvelopeBuilder {
 
+    // Resolve the case's owning project through the feature chain (same two-hop lookup CaptureService
+    // uses) so PROJECT-scoped knowledge is reachable in the real execution path (US1/R4, gap-6 fix).
+    private static final String PROJECT_ID_SQL = """
+            SELECT pv.project_id
+              FROM case_instance ci
+              JOIN feature f          ON f.id = ci.feature_id
+              JOIN project_version pv ON pv.id = f.project_version_id
+             WHERE ci.id = ?
+            """;
+
     private final CaseInstanceRepository caseRepository;
     private final CaseDefinitionSnapshotRepository snapshotRepository;
     private final DefinitionLookupService definitionLookup;
     private final SubmissionDataPort submissionDataPort;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbcTemplate;
     // ObjectProvider so persona-only slice tests (no knowledge module on the path) still wire this
     // builder: getIfAvailable() yields null when no KnowledgeProvider bean exists → no injection (T013).
     private final ObjectProvider<KnowledgeProvider> knowledgeProvider;
@@ -50,6 +62,7 @@ public class ExecutionEnvelopeBuilder {
                                     DefinitionLookupService definitionLookup,
                                     SubmissionDataPort submissionDataPort,
                                     ObjectMapper objectMapper,
+                                    JdbcTemplate jdbcTemplate,
                                     ObjectProvider<KnowledgeProvider> knowledgeProvider,
                                     ObjectProvider<AttachmentSummaryPort> attachmentSummaryPort,
                                     WorkspaceScopeGuard workspaceScopeGuard,
@@ -59,6 +72,7 @@ public class ExecutionEnvelopeBuilder {
         this.definitionLookup = definitionLookup;
         this.submissionDataPort = submissionDataPort;
         this.objectMapper = objectMapper;
+        this.jdbcTemplate = jdbcTemplate;
         this.knowledgeProvider = knowledgeProvider;
         this.attachmentSummaryPort = attachmentSummaryPort;
         this.workspaceScopeGuard = workspaceScopeGuard;
@@ -116,16 +130,34 @@ public class ExecutionEnvelopeBuilder {
     /**
      * Retrieve governed knowledge for this operation. When no {@link KnowledgeProvider} bean is on the
      * path (persona-only slice tests) or the profile is empty, returns an empty list — identical to
-     * pre-Phase-3 behavior. projectId is null in US1 (the seed set is WORKSPACE-scoped).
+     * pre-Phase-3 behavior. The case's owning project is resolved through the feature chain so
+     * PROJECT-scoped items in that project are injected alongside WORKSPACE-scoped ones (R4, gap-6 fix);
+     * if the chain is unresolvable (e.g. a persona-only slice with no feature rows) projectId stays null
+     * and only WORKSPACE-scoped items are eligible — never an error on the injection path.
      */
     private List<KnowledgeProvider.InjectedItem> retrieveKnowledge(CaseInstance kase, List<String> profile) {
         KnowledgeProvider provider = knowledgeProvider.getIfAvailable();
         if (provider == null || profile.isEmpty()) {
             return List.of();
         }
+        UUID projectId = resolveProjectId(kase.getId());
         KnowledgeProvider.KnowledgeQuery query = new KnowledgeProvider.KnowledgeQuery(
-                kase.getWorkspaceId(), null, profile, profile, maxItemsPerOperation);
+                kase.getWorkspaceId(), projectId, profile, profile, maxItemsPerOperation);
         return provider.retrieve(query);
+    }
+
+    /**
+     * Resolve the case's owning project via {@code case_instance → feature → project_version} (T021,
+     * R4). Best-effort: any failure (missing feature chain in a slice test, no row) yields null so the
+     * PROJECT branch of the scope lattice simply contributes nothing — retrieval still returns the
+     * WORKSPACE-scoped set. Runs under the caller's RLS context, so it only sees the case's own project.
+     */
+    private UUID resolveProjectId(UUID caseId) {
+        try {
+            return jdbcTemplate.queryForObject(PROJECT_ID_SQL, UUID.class, caseId);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** Parse the persona definition body's {@code knowledgeProfile} string array (empty if absent). */

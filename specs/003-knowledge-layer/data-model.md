@@ -30,7 +30,7 @@ including a Curator redaction — produces a new version row; versions are never
 | content | text NOT NULL | the injectable knowledge text |
 | content_hash | text NOT NULL | SHA-256 (integrity, Principle III) |
 | embedding | vector NOT NULL | pgvector; HNSW index per partition (R2/R3) |
-| embed_model | text NOT NULL | model identity/version used to embed (Principle II) |
+| embed_model | text NOT NULL | model identity/version (`modelId:modelVersion`) used to embed (Principle II). **Retrieval ranks only rows whose `embed_model` matches the current query model** (R3 re-index contract) — a model swap drops prior-model items out of the entitled set rather than mis-ranking across vector spaces; re-embed (new versions) to restore them. |
 | status | text NOT NULL | `PUBLISHED → DEPRECATED` (items exist only from publish; pre-publish life is CaptureCandidate) |
 | source_candidate_id | uuid NULL | provenance: candidate this version was published from |
 | supersedes_version | int NULL | provenance chain across versions |
@@ -84,6 +84,10 @@ CAPTURED → PREFILTERED → REDACTED → D4_PENDING → PUBLISHED
   `source_candidate_id` provenance. D4 approver identity must differ from the Curator actor
   (edge case: non-self-satisfiable gate).
 - Any stage → `REJECTED`: candidate stays confidential/non-promotable; no partial promotion.
+- **`REJECTED` and `PUBLISHED` are terminal (v1, gap-3):** the machine has no transition out of
+  `REJECTED` — no re-redact/resubmit loop — and `CaptureService` will not re-harvest a case that already
+  has a candidate, so a rejected lesson is not re-capturable for that case in v1. The rejection + stage +
+  reason are the auditable outcome (spec FR-013 v1 scope). A remediation loop is a deferred enhancement.
 
 ### PrefilterFinding (V13, knowledge)
 
@@ -122,7 +126,12 @@ pipeline order (enforced in `PromotionGateService`, asserted by CapturePromotion
 
 ### KnowledgeAffectedExecution (V13, knowledge)
 
-Deprecation flags (FR-015, R8). Append-only; written in the same transaction as the deprecation.
+Deprecation flags (FR-015, R8). Append-only; written in the same transaction as the deprecation via an
+`NOT EXISTS`-idempotent insert-select. **v1 accepted limitation (gap-2):** the flag set is point-in-time
+at deprecation — an execution that commits its snapshot *after* the insert-select runs is not flagged
+(FR-014 permits that in-flight execution to keep its snapshot), so SC-007's 100% is exhaustive for the
+single-node demonstration set but not a concurrent real-time invariant. A reconciliation sweep re-running
+the idempotent insert-select is the deferred path to eventual completeness (research R8).
 
 | Field | Type | Notes |
 |---|---|---|

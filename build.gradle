@@ -51,5 +51,11 @@ subprojects {
 
     tasks.named('test') {
         useJUnitPlatform()
+        // The :app suite spins up ~20 distinct Spring contexts (many @SpringBootTest slices with
+        // different @Import/property sets, so the context cache holds them all). At the JVM default /
+        // -Xmx2g the forked test JVM OOMs mid-run; 4g clears the whole suite. Metaspace is uncapped
+        // by default on JDK 21 but many contexts inflate it, so give it explicit headroom too.
+        maxHeapSize = '4g'
+        jvmArgs '-XX:MaxMetaspaceSize=1g'
     }
 }
