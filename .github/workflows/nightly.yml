@@ -1,0 +1,52 @@
+# D2OS Nightly slow-suite run (feature 008, T013 / enhancement E1 + E12).
+#
+# The project marks its long-running benchmark integration tests with JUnit's `@Tag("slow")`
+# (e.g. TraceabilityBenchmarkIT and ResolutionBenchmarkIT — p95/pin-resolution performance targets).
+# Those tags are EXCLUDED from the ordinary `test`/`build` task (see app/build.gradle) so they never
+# slow the per-PR CI in ci.yml. This nightly workflow is where they run.
+#
+# HOW THE SLOW SUITE IS INCLUDED:
+# app/build.gradle defines a dedicated `slowTest` task that runs exactly the `@Tag("slow")` tests
+# (`useJUnitPlatform { includeTags 'slow' }`). We invoke that task directly — it is the project's
+# canonical, already-wired way to opt the slow benchmarks in, rather than passing an ad-hoc
+# `-Dgroups=slow` / `-PincludeSlow=true` system property that the build would still have to translate
+# into a JUnit tag filter. Same Docker fail-closed contract as ci.yml: the runner provides a real
+# Docker daemon, so these Testcontainers benchmark ITs execute; they must fail, not skip, without it.
+
+name: Nightly
+
+on:
+  schedule:
+    # 03:00 UTC every day.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  slow-suite:
+    name: Slow-tagged benchmark ITs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # `:app:slowTest` runs only the `@Tag("slow")` benchmark ITs (see app/build.gradle). It needs
+      # the runner's Docker daemon for its Testcontainers dependencies.
+      - name: Run slow benchmark suite
+        run: ./gradlew :app:slowTest
+
+      - name: Upload benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-slow-reports
+          path: '**/build/reports/**'
+          if-no-files-found: warn

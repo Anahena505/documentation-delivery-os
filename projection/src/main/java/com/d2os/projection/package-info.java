@@ -9,9 +9,9 @@
  * module boundary (nothing depends on this module) and by DB grant (the {@code d2os_projector}
  * role, see {@link com.d2os.projection.config.ProjectorDataSourceConfig}).
  *
- * <p>Phase 1/2 scope landed here (T001-T007): module scaffolding, config, the V28 schema, the
- * pure {@link com.d2os.projection.NodeEdgeMapper} mapping contract, and the JPA/JDBC entity +
- * repository layer. The projector worker, rebuild job, equivalence verifier, sufficiency audit,
- * traceability queries, cycle detection, and influence dashboard (T008+) are later phases.
+ * <p>Phase 1/2 scope landed here (T001-T007): module scaffolding, config, the V28 schema, the pure
+ * {@link com.d2os.projection.NodeEdgeMapper} mapping contract, and the JPA/JDBC entity + repository
+ * layer. The projector worker, rebuild job, equivalence verifier, sufficiency audit, traceability
+ * queries, cycle detection, and influence dashboard (T008+) are later phases.
  */
 package com.d2os.projection;

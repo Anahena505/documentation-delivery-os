@@ -1,0 +1,123 @@
+# D2OS Continuous Integration (feature 008, T012 / enhancement E1).
+#
+# Runs on every pull request and on every push to `main`. One job on ubuntu-latest that:
+#   1. builds + runs the whole test suite via `./gradlew build` — this executes the fast JUnit unit
+#      layer, the Testcontainers integration suites (*IT), AND the ArchUnit boundary rules (they are
+#      wired as ordinary tests, so `build` runs them).
+#   2. produces JaCoCo coverage reports.
+#   3. uploads all build reports (test + coverage + static analysis) as an artifact for inspection.
+#
+# FAIL-CLOSED CONTRACT (important):
+# GitHub's ubuntu-latest runner ships a real, running Docker daemon, so the Testcontainers ITs
+# genuinely start Postgres/MinIO containers and execute here — this is the environment the local
+# sandbox lacks. Testcontainers is configured to REQUIRE a Docker daemon: if Docker were ever
+# unavailable, the integration step MUST FAIL (a hard error), it MUST NOT be silently skipped.
+# Verification gates fail closed — a green run means the ITs actually ran, never that they were
+# quietly bypassed. Do not add `continue-on-error`, a Docker-availability guard, or any
+# skip-when-no-docker fallback to the build step below.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build, test (unit + Testcontainers IT + ArchUnit) & coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # `build` runs the fast unit tests, the Testcontainers integration suites (they need the
+      # runner's Docker daemon — present on ubuntu-latest), and the ArchUnit rules. If Docker were
+      # missing the ITs fail here rather than skipping (fail-closed — see header).
+      - name: Build (unit + integration + ArchUnit)
+        run: ./gradlew build
+
+      - name: JaCoCo coverage report
+        run: ./gradlew jacocoTestReport
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: '**/build/reports/**'
+          if-no-files-found: warn
+
+  # 008 US7 (T061 / enhancement E11): make the constitution's contract-first rule a CHECKED guarantee.
+  # springdoc (T060) serves the live OpenAPI at /v3/api-docs; openapi-diff compares it to the
+  # checked-in specs/**/contracts/*.yaml and fails the build on BREAKING drift (additive changes pass).
+  # The app boots against a Postgres service container so the full controller surface is present.
+  contract:
+    name: OpenAPI contract conformance (openapi-diff)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: d2os
+          POSTGRES_USER: d2os_owner
+          POSTGRES_PASSWORD: d2os_owner
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U d2os_owner" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      # Boot the app (springdoc serves /v3/api-docs) with the datasource pointed at the service DB,
+      # then capture the live spec. Env mirrors application.yml's ${...} keys; the owner role runs
+      # Flyway and the app connects likewise for this spec-only run.
+      - name: Generate live OpenAPI spec
+        env:
+          D2OS_DB_URL: jdbc:postgresql://localhost:5432/d2os
+          D2OS_DB_OWNER_USER: d2os_owner
+          D2OS_DB_OWNER_PASSWORD: d2os_owner
+          D2OS_DB_APP_USER: d2os_owner
+          D2OS_DB_APP_PASSWORD: d2os_owner
+          D2OS_DB_PROJECTOR_USER: d2os_owner
+          D2OS_DB_PROJECTOR_PASSWORD: d2os_owner
+          D2OS_STORAGE_SECRET_KEY: ci-not-a-secret
+          D2OS_JWT_SECRET: ci-only-signing-key-0123456789ABCDEF0123456789ABCDEF
+        run: |
+          ./gradlew :app:bootRun > bootrun.log 2>&1 &
+          APP_PID=$!
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/v3/api-docs -o live-openapi.json; then break; fi
+            sleep 3
+          done
+          kill "$APP_PID" 2>/dev/null || true
+          test -s live-openapi.json  # fail the job if the spec was never produced
+      # Compare the live spec to each checked-in contract; --fail-on-incompatible makes BREAKING
+      # drift a hard failure while additive evolution passes.
+      - name: openapi-diff vs checked-in contracts
+        run: |
+          shopt -s globstar nullglob
+          for contract in specs/**/contracts/*.yaml; do
+            echo "::group::diff $contract"
+            docker run --rm -v "$PWD:/work" -w /work openapitools/openapi-diff:latest \
+              --fail-on-incompatible "$contract" live-openapi.json || exit 1
+            echo "::endgroup::"
+          done

@@ -1,0 +1,22 @@
+# Normalize line endings — check out/commit with LF regardless of platform.
+* text=auto eol=lf
+
+# Scripts must stay LF.
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Windows scripts stay CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Treat these as binary (no diff/merge, no eol conversion).
+*.jar binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+# Collapse generated/vendored noise in PR diffs.
+gradlew linguist-generated=true
+gradlew.bat linguist-generated=true

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: d2os
+description: >-
+  Documentation Delivery OS (D2OS) — modular-monolith web service for
+  reproducible, provenance-preserving documentation delivery. Ships the
+  Spring Boot application with its config, secret wiring, and
+  liveness/readiness probes.
+type: application
+# Chart version — bump on any change to the chart itself.
+version: 0.1.0
+# Application version this chart deploys (tracks the D2OS image tag).
+appVersion: "0.1.0"

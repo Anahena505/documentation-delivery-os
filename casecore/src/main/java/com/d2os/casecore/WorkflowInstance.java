@@ -4,7 +4,6 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -13,31 +12,38 @@ import java.util.UUID;
 @Table(name = "workflow_instance")
 public class WorkflowInstance {
 
-    @Id
-    private UUID id;
+  @Id private UUID id;
 
-    @Column(name = "workspace_id", nullable = false)
-    private UUID workspaceId;
+  @Column(name = "workspace_id", nullable = false)
+  private UUID workspaceId;
 
-    @Column(name = "case_instance_id", nullable = false)
-    private UUID caseInstanceId;
+  @Column(name = "case_instance_id", nullable = false)
+  private UUID caseInstanceId;
 
-    @Column(name = "engine_instance_id", nullable = false)
-    private String engineInstanceId;
+  @Column(name = "engine_instance_id", nullable = false)
+  private String engineInstanceId;
 
-    @Column(name = "created_at", nullable = false)
-    private OffsetDateTime createdAt = OffsetDateTime.now();
+  @Column(name = "created_at", nullable = false)
+  private OffsetDateTime createdAt = OffsetDateTime.now();
 
-    protected WorkflowInstance() {}
+  protected WorkflowInstance() {}
 
-    public WorkflowInstance(UUID id, UUID workspaceId, UUID caseInstanceId, String engineInstanceId) {
-        this.id = id;
-        this.workspaceId = workspaceId;
-        this.caseInstanceId = caseInstanceId;
-        this.engineInstanceId = engineInstanceId;
-    }
+  public WorkflowInstance(UUID id, UUID workspaceId, UUID caseInstanceId, String engineInstanceId) {
+    this.id = id;
+    this.workspaceId = workspaceId;
+    this.caseInstanceId = caseInstanceId;
+    this.engineInstanceId = engineInstanceId;
+  }
 
-    public UUID getId() { return id; }
-    public UUID getCaseInstanceId() { return caseInstanceId; }
-    public String getEngineInstanceId() { return engineInstanceId; }
+  public UUID getId() {
+    return id;
+  }
+
+  public UUID getCaseInstanceId() {
+    return caseInstanceId;
+  }
+
+  public String getEngineInstanceId() {
+    return engineInstanceId;
+  }
 }

@@ -12,14 +12,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class WorkspaceBudgetController {
 
-    private final WorkspaceBudgetService workspaceBudgetService;
+  private final WorkspaceBudgetService workspaceBudgetService;
 
-    public WorkspaceBudgetController(WorkspaceBudgetService workspaceBudgetService) {
-        this.workspaceBudgetService = workspaceBudgetService;
-    }
+  public WorkspaceBudgetController(WorkspaceBudgetService workspaceBudgetService) {
+    this.workspaceBudgetService = workspaceBudgetService;
+  }
 
-    @GetMapping("/api/v1/workspace/budget")
-    public ResponseEntity<WorkspaceBudgetService.BudgetView> budget() {
-        return ResponseEntity.ok(workspaceBudgetService.get(WorkspaceContext.require()));
-    }
+  @GetMapping("/api/v1/workspace/budget")
+  public ResponseEntity<WorkspaceBudgetService.BudgetView> budget() {
+    return ResponseEntity.ok(workspaceBudgetService.get(WorkspaceContext.require()));
+  }
 }

@@ -16,8 +16,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class PackageExceptionHandler {
 
-    @ExceptionHandler(PackageNotDeliveredException.class)
-    public ProblemDetail onNotDelivered(PackageNotDeliveredException e) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
-    }
+  @ExceptionHandler(PackageNotDeliveredException.class)
+  public ProblemDetail onNotDelivered(PackageNotDeliveredException e) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+  }
 }

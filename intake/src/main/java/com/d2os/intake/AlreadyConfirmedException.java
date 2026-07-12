@@ -6,7 +6,7 @@ package com.d2os.intake;
  * (contracts/api.yaml {@code /case-type/confirm} 409). Mapped by {@link SubmissionController}.
  */
 public class AlreadyConfirmedException extends RuntimeException {
-    public AlreadyConfirmedException(String message) {
-        super(message);
-    }
+  public AlreadyConfirmedException(String message) {
+    super(message);
+  }
 }

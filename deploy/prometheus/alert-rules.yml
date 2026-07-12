@@ -1,0 +1,74 @@
+# Prometheus alerting rules for D2OS (feature 008 — production readiness).
+#
+# Meter naming note: Micrometer meter names use dots (e.g. `d2os.projection.lag.seconds`);
+# the Prometheus exposition format renders those dots as underscores, so the series scraped
+# from `/actuator/prometheus` are `d2os_projection_lag_seconds`, etc. These rules match the
+# Prometheus-rendered names.
+#
+# Thresholds mirror the operational defaults in contracts/operational-interfaces.md §3:
+#   projection.lag-threshold-seconds = 30, projection.gap-alert-threshold = 10.
+groups:
+  - name: d2os-domain-thresholds
+    rules:
+      - alert: D2osProjectionLagHigh
+        expr: d2os_projection_lag_seconds > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Graph projection lag above threshold"
+          description: >-
+            Projection lag (d2os_projection_lag_seconds) has exceeded 30s for more than 2 minutes
+            on {{ $labels.instance }} (current value {{ $value | printf "%.1f" }}s). The read-side
+            graph projection is falling behind the event log; traceability and equivalence queries
+            may return stale results.
+
+      - alert: D2osProjectionGapsOpen
+        expr: d2os_projection_gap_open > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Too many open projection gaps"
+          description: >-
+            {{ $value }} open projection gaps (d2os_projection_gap_open) have persisted for 5 minutes
+            on {{ $labels.instance }}, above the alert threshold of 10. Sustained gaps indicate the
+            projector is not catching up and manual investigation of the gap table is required.
+
+      - alert: D2osGateSlaBreached
+        expr: d2os_gate_sla_breached > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "One or more gates have breached their SLA"
+          description: >-
+            {{ $value }} gate(s) are past their SLA duration (d2os_gate_sla_breached) on
+            {{ $labels.instance }}. Verification gates are backing up; delivery timelines are at risk.
+
+      - alert: D2osRebuildEquivalenceDivergent
+        expr: d2os_rebuild_equivalence_divergent > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Rebuild-equivalence divergence detected"
+          description: >-
+            The rebuild-equivalence verifier flagged a divergence (d2os_rebuild_equivalence_divergent
+            = {{ $value }}) on {{ $labels.instance }}. A projection rebuilt from the event log does not
+            match the live projection — a system-of-record integrity signal that must be triaged
+            immediately.
+
+  - name: d2os-jobs
+    rules:
+      - alert: D2osJobFailuresIncreasing
+        expr: increase(d2os_job_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduled job failures detected"
+          description: >-
+            Job "{{ $labels.job }}" recorded {{ $value }} new failure(s) in the last 5 minutes
+            (d2os_job_failures_total) on {{ $labels.instance }}. Any increase in scheduled-job
+            failures warrants investigation of the job's logs.

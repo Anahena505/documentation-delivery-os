@@ -1,9 +1,11 @@
 apply plugin: 'java-library'
 
 dependencies {
-    api 'org.testcontainers:junit-jupiter:1.20.3'
-    api 'org.testcontainers:postgresql:1.20.3'
-    api 'org.testcontainers:minio:1.20.3'
+    // 008 T001: versions resolved from the testcontainers-bom imported in the root build's
+    // dependencyManagement (applied to every subproject), keeping core aligned to 1.20.3.
+    api 'org.testcontainers:junit-jupiter'
+    api 'org.testcontainers:postgresql'
+    api 'org.testcontainers:minio'
     api 'com.tngtech.archunit:archunit-junit5:1.3.0'
     // Phase 2 T051: ArchitectureRules' statelessness rule matches on @Component/@Service — pulled in as
     // a lightweight, autoconfiguration-free dependency (version resolved via the root project's Spring

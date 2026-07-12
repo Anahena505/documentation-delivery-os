@@ -1,0 +1,51 @@
+name: 🐛 Bug report
+description: Report a problem so we can fix it
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug! Please search existing issues first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps (or a failing test) that trigger the problem.
+      placeholder: |
+        1. Configure '...'
+        2. Run '...'
+        3. See error
+    validations:
+      required: true
+  - type: dropdown
+    id: posture
+    attributes:
+      label: Security posture
+      description: Which auth mode were you running?
+      options:
+        - Default (workspace-scoping)
+        - OIDC enabled (per-user identity + RBAC)
+        - Not applicable
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: JDK version, OS, how you ran it (bootRun / image / CI), Docker version if relevant, commit SHA.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste any stack traces or log output. Redact secrets.
+      render: shell
+    validations:
+      required: false

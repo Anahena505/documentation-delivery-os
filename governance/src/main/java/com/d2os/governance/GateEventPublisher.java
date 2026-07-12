@@ -1,139 +1,180 @@
 package com.d2os.governance;
 
 import com.d2os.casecore.AuditWriter;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Emits the gate lifecycle outbox events (T016, research R8, FR-019) via the existing {@link
- * AuditWriter} mechanism — there is no separate "EventPublisher" abstraction elsewhere in this repo;
- * {@code AuditWriter.record} IS the same-transaction audit-row + outbox-row writer. Every payload
- * matches contracts/api.yaml's {@code GateEventPayload} schema (the projection-sufficient tuple Phase
- * 7's projector depends on) — {@code MANDATORY} propagation means these can only be called from
- * within {@code GateService.open}/{@code decide}'s already-open transaction, so the event is
- * guaranteed to commit or roll back atomically with the gate state change it describes.
+ * AuditWriter} mechanism — there is no separate "EventPublisher" abstraction elsewhere in this
+ * repo; {@code AuditWriter.record} IS the same-transaction audit-row + outbox-row writer. Every
+ * payload matches contracts/api.yaml's {@code GateEventPayload} schema (the projection-sufficient
+ * tuple Phase 7's projector depends on) — {@code MANDATORY} propagation means these can only be
+ * called from within {@code GateService.open}/{@code decide}'s already-open transaction, so the
+ * event is guaranteed to commit or roll back atomically with the gate state change it describes.
  *
- * <p>Only {@code GATE_OPENED} and {@code GATE_DECIDED} are wired in this phase (US1); the other five
- * {@code GateEventPayload} event types ({@code GATE_REOPEN_CANDIDATE}, {@code GATE_IMPACT_ASSESSED},
- * {@code GATE_REOPENED}, {@code GATE_ESCALATION_FIRED}, {@code GATE_REGENERATION_TRIGGERED}) are later
- * phases' (US2-US4) responsibility, added to this same class as those phases land.
+ * <p>Only {@code GATE_OPENED} and {@code GATE_DECIDED} are wired in this phase (US1); the other
+ * five {@code GateEventPayload} event types ({@code GATE_REOPEN_CANDIDATE}, {@code
+ * GATE_IMPACT_ASSESSED}, {@code GATE_REOPENED}, {@code GATE_ESCALATION_FIRED}, {@code
+ * GATE_REGENERATION_TRIGGERED}) are later phases' (US2-US4) responsibility, added to this same
+ * class as those phases land.
  */
 @Component
 public class GateEventPublisher {
 
-    private final AuditWriter auditWriter;
+  private final AuditWriter auditWriter;
 
-    public GateEventPublisher(AuditWriter auditWriter) {
-        this.auditWriter = auditWriter;
-    }
+  public GateEventPublisher(AuditWriter auditWriter) {
+    this.auditWriter = auditWriter;
+  }
 
-    /** {@code GATE_OPENED} — no human decider yet, so the audit actor is the system engine bridge. */
-    @Transactional(propagation = Propagation.MANDATORY)
-    public void publishOpened(GateInstance gate) {
-        Map<String, Object> payload = basePayload("GATE_OPENED", gate);
-        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_OPENED",
-                "system:engine", payload);
-    }
+  /** {@code GATE_OPENED} — no human decider yet, so the audit actor is the system engine bridge. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void publishOpened(GateInstance gate) {
+    Map<String, Object> payload = basePayload("GATE_OPENED", gate);
+    auditWriter.record(
+        gate.getWorkspaceId(),
+        "gate_instance",
+        gate.getId(),
+        "GATE_OPENED",
+        "system:engine",
+        payload);
+  }
 
-    /** {@code GATE_DECIDED} — carries the verb, decider, and Decision id (FR-002/019). */
-    @Transactional(propagation = Propagation.MANDATORY)
-    public void publishDecided(GateInstance gate, GateService.Verb verb, String deciderId, UUID decisionId) {
-        Map<String, Object> payload = basePayload("GATE_DECIDED", gate);
-        payload.put("decisionVerb", verb.name());
-        payload.put("deciderId", deciderId);
-        payload.put("decisionId", decisionId == null ? null : decisionId.toString());
-        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_DECIDED",
-                deciderId, payload);
-    }
+  /** {@code GATE_DECIDED} — carries the verb, decider, and Decision id (FR-002/019). */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void publishDecided(
+      GateInstance gate, GateService.Verb verb, String deciderId, UUID decisionId) {
+    Map<String, Object> payload = basePayload("GATE_DECIDED", gate);
+    payload.put("decisionVerb", verb.name());
+    payload.put("deciderId", deciderId);
+    payload.put("decisionId", decisionId == null ? null : decisionId.toString());
+    auditWriter.record(
+        gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_DECIDED", deciderId, payload);
+  }
 
-    /**
-     * {@code GATE_REGENERATION_TRIGGERED} (T022, research R8, FR-019) — emitted by {@code
-     * GateTaskBridge} (orchestration) at the moment it opens the NEW gate cycle a comment-and-regenerate
-     * re-entry produced (the {@code regenerationDeltaReportId} process variable {@code
-     * RegenerationDelegate} set is non-null), carrying the produced revision id per contracts/api.yaml's
-     * {@code GateEventPayload.producedArtifactRevisionId}. Uses plain (non-MANDATORY) {@code
-     * @Transactional} — unlike {@link #publishOpened}/{@link #publishDecided}, this is not always called
-     * from inside {@code GateService}'s own transaction, so it opens/joins one itself; {@link
-     * AuditWriter#record}'s MANDATORY requirement is still satisfied because a transaction is active by
-     * the time that call runs.
-     */
-    @Transactional
-    public void publishRegenerationTriggered(GateInstance newGate, UUID producedArtifactRevisionId) {
-        Map<String, Object> payload = basePayload("GATE_REGENERATION_TRIGGERED", newGate);
-        payload.put("producedArtifactRevisionId",
-                producedArtifactRevisionId == null ? null : producedArtifactRevisionId.toString());
-        auditWriter.record(newGate.getWorkspaceId(), "gate_instance", newGate.getId(), "GATE_REGENERATION_TRIGGERED",
-                "system:engine", payload);
-    }
+  /**
+   * {@code GATE_REGENERATION_TRIGGERED} (T022, research R8, FR-019) — emitted by {@code
+   * GateTaskBridge} (orchestration) at the moment it opens the NEW gate cycle a
+   * comment-and-regenerate re-entry produced (the {@code regenerationDeltaReportId} process
+   * variable {@code RegenerationDelegate} set is non-null), carrying the produced revision id per
+   * contracts/api.yaml's {@code GateEventPayload.producedArtifactRevisionId}. Uses plain
+   * (non-MANDATORY) {@code @Transactional} — unlike {@link #publishOpened}/{@link #publishDecided},
+   * this is not always called from inside {@code GateService}'s own transaction, so it opens/joins
+   * one itself; {@link AuditWriter#record}'s MANDATORY requirement is still satisfied because a
+   * transaction is active by the time that call runs.
+   */
+  @Transactional
+  public void publishRegenerationTriggered(GateInstance newGate, UUID producedArtifactRevisionId) {
+    Map<String, Object> payload = basePayload("GATE_REGENERATION_TRIGGERED", newGate);
+    payload.put(
+        "producedArtifactRevisionId",
+        producedArtifactRevisionId == null ? null : producedArtifactRevisionId.toString());
+    auditWriter.record(
+        newGate.getWorkspaceId(),
+        "gate_instance",
+        newGate.getId(),
+        "GATE_REGENERATION_TRIGGERED",
+        "system:engine",
+        payload);
+  }
 
-    /**
-     * {@code GATE_REOPEN_CANDIDATE} (T029, US3, research R8, FR-019) — emitted by {@code
-     * ReopenCandidateService} the moment a direct dependent's already-APPROVED gate flips to {@code
-     * REOPEN_CANDIDATE}; carries the candidate row's depth and upstream/dependent revision ids.
-     */
-    @Transactional
-    public void publishReopenCandidate(GateInstance gate, com.d2os.governance.reopen.GateReopenCandidate candidate) {
-        Map<String, Object> payload = basePayload("GATE_REOPEN_CANDIDATE", gate);
-        payload.put("candidateId", candidate.getId().toString());
-        payload.put("upstreamArtifactRevisionId", candidate.getUpstreamArtifactRevisionId().toString());
-        payload.put("dependentArtifactRevisionId", candidate.getDependentArtifactRevisionId().toString());
-        payload.put("depth", candidate.getDepth());
-        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_REOPEN_CANDIDATE",
-                "system:reopen-candidate-service", payload);
-    }
+  /**
+   * {@code GATE_REOPEN_CANDIDATE} (T029, US3, research R8, FR-019) — emitted by {@code
+   * ReopenCandidateService} the moment a direct dependent's already-APPROVED gate flips to {@code
+   * REOPEN_CANDIDATE}; carries the candidate row's depth and upstream/dependent revision ids.
+   */
+  @Transactional
+  public void publishReopenCandidate(
+      GateInstance gate, com.d2os.governance.reopen.GateReopenCandidate candidate) {
+    Map<String, Object> payload = basePayload("GATE_REOPEN_CANDIDATE", gate);
+    payload.put("candidateId", candidate.getId().toString());
+    payload.put("upstreamArtifactRevisionId", candidate.getUpstreamArtifactRevisionId().toString());
+    payload.put(
+        "dependentArtifactRevisionId", candidate.getDependentArtifactRevisionId().toString());
+    payload.put("depth", candidate.getDepth());
+    auditWriter.record(
+        gate.getWorkspaceId(),
+        "gate_instance",
+        gate.getId(),
+        "GATE_REOPEN_CANDIDATE",
+        "system:reopen-candidate-service",
+        payload);
+  }
 
-    /** {@code GATE_IMPACT_ASSESSED} (T029, US3, research R8, FR-019) — an ImpactAssessment was recorded. */
-    @Transactional
-    public void publishImpactAssessed(GateInstance gate, UUID impactAssessmentId, String author) {
-        Map<String, Object> payload = basePayload("GATE_IMPACT_ASSESSED", gate);
-        payload.put("impactAssessmentId", impactAssessmentId.toString());
-        payload.put("author", author);
-        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_IMPACT_ASSESSED",
-                author, payload);
-    }
+  /**
+   * {@code GATE_IMPACT_ASSESSED} (T029, US3, research R8, FR-019) — an ImpactAssessment was
+   * recorded.
+   */
+  @Transactional
+  public void publishImpactAssessed(GateInstance gate, UUID impactAssessmentId, String author) {
+    Map<String, Object> payload = basePayload("GATE_IMPACT_ASSESSED", gate);
+    payload.put("impactAssessmentId", impactAssessmentId.toString());
+    payload.put("author", author);
+    auditWriter.record(
+        gate.getWorkspaceId(),
+        "gate_instance",
+        gate.getId(),
+        "GATE_IMPACT_ASSESSED",
+        author,
+        payload);
+  }
 
-    /** {@code GATE_REOPENED} (T029, US3, research R8, FR-019) — REOPEN_CANDIDATE -> REOPENED. */
-    @Transactional
-    public void publishReopened(GateInstance gate, String actorId) {
-        Map<String, Object> payload = basePayload("GATE_REOPENED", gate);
-        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_REOPENED",
-                actorId, payload);
-    }
+  /** {@code GATE_REOPENED} (T029, US3, research R8, FR-019) — REOPEN_CANDIDATE -> REOPENED. */
+  @Transactional
+  public void publishReopened(GateInstance gate, String actorId) {
+    Map<String, Object> payload = basePayload("GATE_REOPENED", gate);
+    auditWriter.record(
+        gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_REOPENED", actorId, payload);
+  }
 
-    /** {@code GATE_ESCALATION_FIRED} (T036, US4, research R8/R4, FR-019) — an advisory SLA timer fired. */
-    @Transactional
-    public void publishEscalationFired(GateInstance gate, String policyKey, int policyVersion, int stepIndex) {
-        Map<String, Object> payload = basePayload("GATE_ESCALATION_FIRED", gate);
-        payload.put("policyKey", policyKey);
-        payload.put("policyVersion", policyVersion);
-        payload.put("stepIndex", stepIndex);
-        auditWriter.record(gate.getWorkspaceId(), "gate_instance", gate.getId(), "GATE_ESCALATION_FIRED",
-                "system:timer", payload);
-    }
+  /**
+   * {@code GATE_ESCALATION_FIRED} (T036, US4, research R8/R4, FR-019) — an advisory SLA timer
+   * fired.
+   */
+  @Transactional
+  public void publishEscalationFired(
+      GateInstance gate, String policyKey, int policyVersion, int stepIndex) {
+    Map<String, Object> payload = basePayload("GATE_ESCALATION_FIRED", gate);
+    payload.put("policyKey", policyKey);
+    payload.put("policyVersion", policyVersion);
+    payload.put("stepIndex", stepIndex);
+    auditWriter.record(
+        gate.getWorkspaceId(),
+        "gate_instance",
+        gate.getId(),
+        "GATE_ESCALATION_FIRED",
+        "system:timer",
+        payload);
+  }
 
-    /** The projection-sufficient tuple every {@code GateEventPayload} shares (contracts/api.yaml). */
-    private Map<String, Object> basePayload(String eventType, GateInstance gate) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("eventType", eventType);
-        payload.put("gateId", gate.getId().toString());
-        payload.put("gateType", gate.getGateType().name());
-        payload.put("gateDefinitionKey", gate.getGateDefinitionKey());
-        payload.put("gateDefinitionVersion", gate.getGateDefinitionVersion());
-        // V27 (tasks.md T013): a DEFINITION_VERSION-subject gate (studio publish review) has no
-        // owning case — caseInstanceId is null for those rows.
-        payload.put("caseInstanceId", gate.getCaseInstanceId() == null ? null : gate.getCaseInstanceId().toString());
-        payload.put("workspaceId", gate.getWorkspaceId().toString());
-        payload.put("subjectArtifactRevisionId",
-                gate.getSubjectArtifactRevisionId() == null ? null : gate.getSubjectArtifactRevisionId().toString());
-        payload.put("escalationPolicyKey", gate.getEscalationPolicyKey());
-        payload.put("escalationPolicyVersion", gate.getEscalationPolicyVersion());
-        payload.put("occurredAt", OffsetDateTime.now().toString());
-        return payload;
-    }
+  /** The projection-sufficient tuple every {@code GateEventPayload} shares (contracts/api.yaml). */
+  private Map<String, Object> basePayload(String eventType, GateInstance gate) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("eventType", eventType);
+    payload.put("gateId", gate.getId().toString());
+    payload.put("gateType", gate.getGateType().name());
+    payload.put("gateDefinitionKey", gate.getGateDefinitionKey());
+    payload.put("gateDefinitionVersion", gate.getGateDefinitionVersion());
+    // V27 (tasks.md T013): a DEFINITION_VERSION-subject gate (studio publish review) has no
+    // owning case — caseInstanceId is null for those rows.
+    payload.put(
+        "caseInstanceId",
+        gate.getCaseInstanceId() == null ? null : gate.getCaseInstanceId().toString());
+    payload.put("workspaceId", gate.getWorkspaceId().toString());
+    payload.put(
+        "subjectArtifactRevisionId",
+        gate.getSubjectArtifactRevisionId() == null
+            ? null
+            : gate.getSubjectArtifactRevisionId().toString());
+    payload.put("escalationPolicyKey", gate.getEscalationPolicyKey());
+    payload.put("escalationPolicyVersion", gate.getEscalationPolicyVersion());
+    payload.put("occurredAt", OffsetDateTime.now().toString());
+    return payload;
+  }
 }

@@ -30,4 +30,19 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+
+    // US3 (T023): @SchedulerLock on Projector/RebuildJob/CycleDetector scheduled sweeps. The
+    // annotation lives in shedlock-spring, needed on this module's own compile classpath; the
+    // LockProvider bean is wired once in app (ShedLockConfig).
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:5.16.0'
+
+    // US2 (T019/T020): projection's scheduled jobs record per-job USE metrics via observability's
+    // JobMetrics, and ProjectionMetrics registers domain gauges via a MeterRegistry. observability
+    // does NOT depend on projection (observability -> casecore only), so projection -> observability
+    // is acyclic — the JobMetrics-via-dependency path, not a direct MeterRegistry inject.
+    implementation project(':observability')
+    // T020: ProjectionMetrics references io.micrometer.core.instrument.{Gauge,MeterRegistry} directly.
+    // Only micrometer-observation is otherwise transitively present; JobMetrics does not re-export
+    // micrometer-core (observability depends on it as `implementation`), so add it explicitly.
+    implementation 'io.micrometer:micrometer-core'
 }

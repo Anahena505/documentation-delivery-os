@@ -1,7 +1,6 @@
 package com.d2os.intake.dto;
 
 import com.d2os.intake.ProblemSubmission;
-
 import java.util.UUID;
 
 /**
@@ -11,21 +10,19 @@ import java.util.UUID;
  * (research R5).
  */
 public record CaseTypeClassificationResponse(
-        UUID submissionId,
-        String proposedCaseType,
-        String confirmedCaseType,
-        String classificationStatus,
-        boolean overridden,
-        UUID decisionId
-) {
-    public static CaseTypeClassificationResponse from(ProblemSubmission s, UUID decisionId) {
-        return new CaseTypeClassificationResponse(
-                s.getId(),
-                s.getProposedCaseType(),
-                s.getConfirmedCaseType(),
-                s.getClassificationStatus(),
-                s.isClassificationOverridden(),
-                decisionId
-        );
-    }
+    UUID submissionId,
+    String proposedCaseType,
+    String confirmedCaseType,
+    String classificationStatus,
+    boolean overridden,
+    UUID decisionId) {
+  public static CaseTypeClassificationResponse from(ProblemSubmission s, UUID decisionId) {
+    return new CaseTypeClassificationResponse(
+        s.getId(),
+        s.getProposedCaseType(),
+        s.getConfirmedCaseType(),
+        s.getClassificationStatus(),
+        s.isClassificationOverridden(),
+        decisionId);
+  }
 }

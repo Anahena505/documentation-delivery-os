@@ -18,34 +18,36 @@ import java.util.Set;
  * Snapshot pinning happens exactly on the {@code Classified → Planned} transition (FR-003).
  */
 public enum CaseStatus {
-    Submitted,
-    Classified,
-    Planned,
-    Running,
-    Waiting,
-    Suspended,
-    Escalated,
-    Delivered,
-    Cancelled;
+  Submitted,
+  Classified,
+  Planned,
+  Running,
+  Waiting,
+  Suspended,
+  Escalated,
+  Delivered,
+  Cancelled;
 
-    private static final Map<CaseStatus, Set<CaseStatus>> ALLOWED = Map.of(
-        Submitted,  EnumSet.of(Classified, Cancelled),
-        Classified, EnumSet.of(Planned, Cancelled),
-        Planned,    EnumSet.of(Running, Cancelled),
-        Running,    EnumSet.of(Waiting, Suspended, Escalated, Delivered),
-        Waiting,    EnumSet.of(Running, Suspended, Cancelled),
-        Suspended,  EnumSet.of(Running, Cancelled),
-        Escalated,  EnumSet.of(Running, Cancelled),
-        Delivered,  EnumSet.noneOf(CaseStatus.class),
-        Cancelled,  EnumSet.noneOf(CaseStatus.class)
-    );
+  private static final Map<CaseStatus, Set<CaseStatus>> ALLOWED =
+      Map.of(
+          Submitted, EnumSet.of(Classified, Cancelled),
+          Classified, EnumSet.of(Planned, Cancelled),
+          Planned, EnumSet.of(Running, Cancelled),
+          Running, EnumSet.of(Waiting, Suspended, Escalated, Delivered),
+          Waiting, EnumSet.of(Running, Suspended, Cancelled),
+          Suspended, EnumSet.of(Running, Cancelled),
+          Escalated, EnumSet.of(Running, Cancelled),
+          Delivered, EnumSet.noneOf(CaseStatus.class),
+          Cancelled, EnumSet.noneOf(CaseStatus.class));
 
-    /** @return true if this → target is a legal transition. */
-    public boolean canTransitionTo(CaseStatus target) {
-        return ALLOWED.getOrDefault(this, EnumSet.noneOf(CaseStatus.class)).contains(target);
-    }
+  /**
+   * @return true if this → target is a legal transition.
+   */
+  public boolean canTransitionTo(CaseStatus target) {
+    return ALLOWED.getOrDefault(this, EnumSet.noneOf(CaseStatus.class)).contains(target);
+  }
 
-    public boolean isTerminal() {
-        return this == Delivered || this == Cancelled;
-    }
+  public boolean isTerminal() {
+    return this == Delivered || this == Cancelled;
+  }
 }

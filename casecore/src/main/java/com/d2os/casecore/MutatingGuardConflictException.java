@@ -11,21 +11,24 @@ import java.util.UUID;
  */
 public class MutatingGuardConflictException extends RuntimeException {
 
-    private final UUID featureId;
-    private final UUID activeCaseId;
+  private final UUID featureId;
+  private final UUID activeCaseId;
 
-    public MutatingGuardConflictException(UUID featureId, UUID activeCaseId) {
-        super("feature " + featureId + " already has an active mutating case"
-                + (activeCaseId != null ? " (" + activeCaseId + ")" : ""));
-        this.featureId = featureId;
-        this.activeCaseId = activeCaseId;
-    }
+  public MutatingGuardConflictException(UUID featureId, UUID activeCaseId) {
+    super(
+        "feature "
+            + featureId
+            + " already has an active mutating case"
+            + (activeCaseId != null ? " (" + activeCaseId + ")" : ""));
+    this.featureId = featureId;
+    this.activeCaseId = activeCaseId;
+  }
 
-    public UUID getFeatureId() {
-        return featureId;
-    }
+  public UUID getFeatureId() {
+    return featureId;
+  }
 
-    public UUID getActiveCaseId() {
-        return activeCaseId;
-    }
+  public UUID getActiveCaseId() {
+    return activeCaseId;
+  }
 }

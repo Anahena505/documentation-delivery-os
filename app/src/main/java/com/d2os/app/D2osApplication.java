@@ -19,9 +19,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication(scanBasePackages = "com.d2os")
 @EntityScan(basePackages = "com.d2os")
 @EnableJpaRepositories(basePackages = "com.d2os")
-@EnableScheduling   // ReconciliationJob dual-state sweep (T025, FR-010)
+@EnableScheduling // ReconciliationJob dual-state sweep (T025, FR-010)
 public class D2osApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(D2osApplication.class, args);
-    }
+  public static void main(String[] args) {
+    SpringApplication.run(D2osApplication.class, args);
+  }
 }

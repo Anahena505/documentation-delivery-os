@@ -22,4 +22,15 @@ dependencies {
 
     // T002 (research R2): deterministic unified diffs for DeltaReportService — never an AI summary.
     implementation 'io.github.java-diff-utils:java-diff-utils:4.17'
+
+    // US2 (T020): GovernanceMetrics registers the d2os.gate.sla.breached gauge via a MeterRegistry;
+    // TimerFiredHandler increments it on each advisory SLA escalation firing. governance stays
+    // engine-agnostic and does not depend on observability — micrometer-core (home of MeterRegistry/
+    // Gauge) is added directly; the MeterRegistry bean itself is provided by the app at runtime.
+    implementation 'io.micrometer:micrometer-core'
+
+    // 008 US5 (T052): @PreAuthorize role gate on GateController.decide (governance-approver). The
+    // annotation lives in spring-security-core; it is enforced only in OIDC mode (method security is
+    // enabled by OidcSecurityConfig) and inert otherwise. BOM-managed — no version.
+    implementation 'org.springframework.security:spring-security-core'
 }

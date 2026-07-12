@@ -1,5 +1,12 @@
 apply plugin: 'org.springframework.boot'
 
+// US4 (T036): build a versioned, layered OCI image via Cloud Native Buildpacks (no hand-maintained
+// Dockerfile). `gradle :app:bootBuildImage` produces d2os/app:<project.version>; the image build
+// itself needs a Docker daemon and runs in CI.
+tasks.named('bootBuildImage') {
+    imageName = "d2os/app:${project.version}"
+}
+
 dependencies {
     implementation project(':catalog')
     implementation project(':tenancy')
@@ -24,9 +31,35 @@ dependencies {
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-database-postgresql'
 
+    // US3 (T023): ShedLock coordinates once-per-cycle execution of the 9 @Scheduled jobs across
+    // instances. shedlock-spring supplies @EnableSchedulerLock + @SchedulerLock; the jdbc-template
+    // provider backs the LockProvider bean (ShedLockConfig) against the app's primary DataSource.
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:5.16.0'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:5.16.0'
+
+    // US2 (T015): Prometheus registry — exposes all Micrometer meters at /actuator/prometheus.
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    // US2 (T016): distributed tracing via the OpenTelemetry bridge, exporting spans over OTLP. Both
+    // BOM-managed. The OTLP endpoint defaults empty (application.yml) so tracing is a no-op and the
+    // app boots without a collector.
+    implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+    implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
+    // US2 (T017): JSON structured logs with workspace_id/case_id/trace_id in MDC (logback-spring.xml).
+    // Non-BOM library — pinned.
+    implementation 'net.logstash.logback:logstash-logback-encoder:8.0'
+
+    // US7 (T060): springdoc emits the live OpenAPI at /v3/api-docs so CI (openapi-diff) can check the
+    // running controllers against the checked-in specs/**/contracts/*.yaml. Non-BOM — pinned.
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-api:2.6.0'
+
     testImplementation project(':test-support')
     testImplementation platform('software.amazon.awssdk:bom:2.28.29')
     testImplementation 'software.amazon.awssdk:s3'
+    // 008 US5 (T053/T054): mint & verify RS256 OIDC test tokens for the resource-server path
+    // (RbacAndActorIT boots in OIDC mode). The starter brings spring-security-oauth2-jose +
+    // Nimbus (SignedJWT/RSASSASigner/RSAKey) and NimbusJwtDecoder for the test JwtDecoder bean.
+    // BOM-managed — no version. Test-scope only, so it never changes the app's default runtime posture.
+    testImplementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     // TestRestTemplate's default JDK HttpURLConnection throws HttpRetryException instead of
     // surfacing a 401 on a streamed POST; Apache HttpClient (auto-detected) handles it.
     testImplementation 'org.apache.httpcomponents.client5:httpclient5'

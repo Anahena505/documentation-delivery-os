@@ -13,15 +13,14 @@ import com.d2os.persona.spi.KnowledgeProvider;
 import com.d2os.persona.spi.SubmissionDataPort;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 /**
  * Builds the stateless execution envelope for one persona step (T029, AD-8), resolving every
@@ -33,9 +32,10 @@ import java.util.UUID;
 @Component
 public class ExecutionEnvelopeBuilder {
 
-    // Resolve the case's owning project through the feature chain (same two-hop lookup CaptureService
-    // uses) so PROJECT-scoped knowledge is reachable in the real execution path (US1/R4, gap-6 fix).
-    private static final String PROJECT_ID_SQL = """
+  // Resolve the case's owning project through the feature chain (same two-hop lookup CaptureService
+  // uses) so PROJECT-scoped knowledge is reachable in the real execution path (US1/R4, gap-6 fix).
+  private static final String PROJECT_ID_SQL =
+      """
             SELECT pv.project_id
               FROM case_instance ci
               JOIN feature f          ON f.id = ci.feature_id
@@ -43,211 +43,256 @@ public class ExecutionEnvelopeBuilder {
              WHERE ci.id = ?
             """;
 
-    private final CaseInstanceRepository caseRepository;
-    private final CaseDefinitionSnapshotRepository snapshotRepository;
-    private final DefinitionLookupService definitionLookup;
-    private final SubmissionDataPort submissionDataPort;
-    private final ObjectMapper objectMapper;
-    private final JdbcTemplate jdbcTemplate;
-    // ObjectProvider so persona-only slice tests (no knowledge module on the path) still wire this
-    // builder: getIfAvailable() yields null when no KnowledgeProvider bean exists → no injection (T013).
-    private final ObjectProvider<KnowledgeProvider> knowledgeProvider;
-    // ObjectProvider so persona-only slice tests (no intake on the path) still wire this builder:
-    // getIfAvailable() yields null when no AttachmentSummaryPort bean exists → no summaries (T044).
-    private final ObjectProvider<AttachmentSummaryPort> attachmentSummaryPort;
-    // ObjectProvider so persona-only slice tests (no orchestration on the path) still wire this
-    // builder: getIfAvailable() yields null when no BaselineContextPort bean exists → no baseline
-    // context (T023). Non-Enhancement cases also naturally resolve to an empty list (the port has
-    // nothing to read back for them).
-    private final ObjectProvider<BaselineContextPort> baselineContextPort;
-    private final WorkspaceScopeGuard workspaceScopeGuard;
-    private final int maxItemsPerOperation;
+  private final CaseInstanceRepository caseRepository;
+  private final CaseDefinitionSnapshotRepository snapshotRepository;
+  private final DefinitionLookupService definitionLookup;
+  private final SubmissionDataPort submissionDataPort;
+  private final ObjectMapper objectMapper;
+  private final JdbcTemplate jdbcTemplate;
+  // ObjectProvider so persona-only slice tests (no knowledge module on the path) still wire this
+  // builder: getIfAvailable() yields null when no KnowledgeProvider bean exists → no injection
+  // (T013).
+  private final ObjectProvider<KnowledgeProvider> knowledgeProvider;
+  // ObjectProvider so persona-only slice tests (no intake on the path) still wire this builder:
+  // getIfAvailable() yields null when no AttachmentSummaryPort bean exists → no summaries (T044).
+  private final ObjectProvider<AttachmentSummaryPort> attachmentSummaryPort;
+  // ObjectProvider so persona-only slice tests (no orchestration on the path) still wire this
+  // builder: getIfAvailable() yields null when no BaselineContextPort bean exists → no baseline
+  // context (T023). Non-Enhancement cases also naturally resolve to an empty list (the port has
+  // nothing to read back for them).
+  private final ObjectProvider<BaselineContextPort> baselineContextPort;
+  private final WorkspaceScopeGuard workspaceScopeGuard;
+  private final int maxItemsPerOperation;
 
-    public ExecutionEnvelopeBuilder(CaseInstanceRepository caseRepository,
-                                    CaseDefinitionSnapshotRepository snapshotRepository,
-                                    DefinitionLookupService definitionLookup,
-                                    SubmissionDataPort submissionDataPort,
-                                    ObjectMapper objectMapper,
-                                    JdbcTemplate jdbcTemplate,
-                                    ObjectProvider<KnowledgeProvider> knowledgeProvider,
-                                    ObjectProvider<AttachmentSummaryPort> attachmentSummaryPort,
-                                    ObjectProvider<BaselineContextPort> baselineContextPort,
-                                    WorkspaceScopeGuard workspaceScopeGuard,
-                                    @Value("${d2os.knowledge.max-items-per-operation:5}") int maxItemsPerOperation) {
-        this.caseRepository = caseRepository;
-        this.snapshotRepository = snapshotRepository;
-        this.definitionLookup = definitionLookup;
-        this.submissionDataPort = submissionDataPort;
-        this.objectMapper = objectMapper;
-        this.jdbcTemplate = jdbcTemplate;
-        this.knowledgeProvider = knowledgeProvider;
-        this.attachmentSummaryPort = attachmentSummaryPort;
-        this.baselineContextPort = baselineContextPort;
-        this.workspaceScopeGuard = workspaceScopeGuard;
-        this.maxItemsPerOperation = maxItemsPerOperation;
+  public ExecutionEnvelopeBuilder(
+      CaseInstanceRepository caseRepository,
+      CaseDefinitionSnapshotRepository snapshotRepository,
+      DefinitionLookupService definitionLookup,
+      SubmissionDataPort submissionDataPort,
+      ObjectMapper objectMapper,
+      JdbcTemplate jdbcTemplate,
+      ObjectProvider<KnowledgeProvider> knowledgeProvider,
+      ObjectProvider<AttachmentSummaryPort> attachmentSummaryPort,
+      ObjectProvider<BaselineContextPort> baselineContextPort,
+      WorkspaceScopeGuard workspaceScopeGuard,
+      @Value("${d2os.knowledge.max-items-per-operation:5}") int maxItemsPerOperation) {
+    this.caseRepository = caseRepository;
+    this.snapshotRepository = snapshotRepository;
+    this.definitionLookup = definitionLookup;
+    this.submissionDataPort = submissionDataPort;
+    this.objectMapper = objectMapper;
+    this.jdbcTemplate = jdbcTemplate;
+    this.knowledgeProvider = knowledgeProvider;
+    this.attachmentSummaryPort = attachmentSummaryPort;
+    this.baselineContextPort = baselineContextPort;
+    this.workspaceScopeGuard = workspaceScopeGuard;
+    this.maxItemsPerOperation = maxItemsPerOperation;
+  }
+
+  public PersonaEnvelope build(UUID caseId, String personaKey) {
+    return build(caseId, personaKey, null);
+  }
+
+  /**
+   * Phase 5 (T019, research R2): {@code regenerationComments} is non-null only when this envelope
+   * is being built for a comment-and-regenerate re-entry ({@code RegenerationDelegate},
+   * orchestration) — carried straight through onto the envelope for {@link PromptRenderer} to place
+   * inside its own untrusted-data delimiters (T1-a). Null for every ordinary persona step.
+   */
+  public PersonaEnvelope build(UUID caseId, String personaKey, String regenerationComments) {
+    CaseInstance kase =
+        caseRepository
+            .findById(caseId)
+            .orElseThrow(() -> new NoSuchElementException("case " + caseId));
+    CaseDefinitionSnapshot snapshot =
+        snapshotRepository
+            .findByCaseInstanceId(caseId)
+            .orElseThrow(
+                () -> new IllegalStateException("case " + caseId + " has no pinned snapshot"));
+
+    JsonNode entries = readEntries(snapshot.getEntries());
+    VersionRef personaRef = find(entries, "persona", personaKey);
+    VersionRef promptRef = find(entries, "prompt", personaKey + "-prompt");
+    VersionRef rubricRef = find(entries, "rubric", personaKey + "-rubric");
+
+    DefinitionView personaDef = resolve("persona", personaRef);
+    DefinitionView promptDef = resolve("prompt", promptRef);
+    DefinitionView rubricDef = resolve("rubric", rubricRef);
+
+    String formDataJson =
+        submissionDataPort
+            .findFormDataJson(kase.getSubmissionId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "submission " + kase.getSubmissionId() + " not found"));
+
+    // US5 (T044, FR-015): sanitized attachment summaries only — never raw bytes. Empty when no
+    // AttachmentSummaryPort bean is on the path (persona-only slice tests) or the submission has
+    // none.
+    List<String> attachmentSummaries = resolveAttachmentSummaries(kase.getSubmissionId());
+
+    // Phase 5 (T023, US3, research R4): Enhancement's resolved baseline reference set. Empty for
+    // every non-Enhancement case (no BASELINE_RESOLVED audit entry to read back) or when no
+    // BaselineContextPort bean is on the path (persona-only slice tests).
+    List<String> baselineContext = resolveBaselineContext(caseId);
+
+    // Phase 3 (T013): resolve the persona's knowledge profile from its definition body, retrieve
+    // the
+    // entitled items, and assert workspace scope (T015) before they enter the envelope.
+    List<String> knowledgeProfile = extractKnowledgeProfile(personaDef.body());
+    List<KnowledgeProvider.InjectedItem> injectedKnowledge =
+        retrieveKnowledge(kase, knowledgeProfile);
+    workspaceScopeGuard.assertSameWorkspace(kase.getWorkspaceId(), injectedKnowledge);
+    int estimatedInjectedTokens = estimateTokens(injectedKnowledge);
+
+    return new PersonaEnvelope(
+        caseId,
+        personaKey,
+        personaDef.id(),
+        personaDef.version(),
+        promptDef.id(),
+        promptDef.version(),
+        extractTemplate(promptDef.body()),
+        rubricDef.id(),
+        rubricDef.version(),
+        rubricDef.body(),
+        formDataJson,
+        injectedKnowledge,
+        estimatedInjectedTokens,
+        attachmentSummaries,
+        regenerationComments,
+        baselineContext);
+  }
+
+  /**
+   * Sanitized attachment summaries for the submission, or empty when none/no port is wired (T044).
+   */
+  private List<String> resolveAttachmentSummaries(UUID submissionId) {
+    AttachmentSummaryPort port = attachmentSummaryPort.getIfAvailable();
+    if (port == null || submissionId == null) {
+      return List.of();
     }
+    return port.findSummaryTexts(submissionId);
+  }
 
-    public PersonaEnvelope build(UUID caseId, String personaKey) {
-        return build(caseId, personaKey, null);
+  /**
+   * Enhancement's resolved baseline reference summaries, or empty when none/no port is wired
+   * (T023).
+   */
+  private List<String> resolveBaselineContext(UUID caseId) {
+    BaselineContextPort port = baselineContextPort.getIfAvailable();
+    if (port == null) {
+      return List.of();
     }
+    return port.findBaselineSummaries(caseId);
+  }
 
-    /**
-     * Phase 5 (T019, research R2): {@code regenerationComments} is non-null only when this envelope is
-     * being built for a comment-and-regenerate re-entry ({@code RegenerationDelegate}, orchestration) —
-     * carried straight through onto the envelope for {@link PromptRenderer} to place inside its own
-     * untrusted-data delimiters (T1-a). Null for every ordinary persona step.
-     */
-    public PersonaEnvelope build(UUID caseId, String personaKey, String regenerationComments) {
-        CaseInstance kase = caseRepository.findById(caseId)
-                .orElseThrow(() -> new NoSuchElementException("case " + caseId));
-        CaseDefinitionSnapshot snapshot = snapshotRepository.findByCaseInstanceId(caseId)
-                .orElseThrow(() -> new IllegalStateException("case " + caseId + " has no pinned snapshot"));
-
-        JsonNode entries = readEntries(snapshot.getEntries());
-        VersionRef personaRef = find(entries, "persona", personaKey);
-        VersionRef promptRef = find(entries, "prompt", personaKey + "-prompt");
-        VersionRef rubricRef = find(entries, "rubric", personaKey + "-rubric");
-
-        DefinitionView personaDef = resolve("persona", personaRef);
-        DefinitionView promptDef = resolve("prompt", promptRef);
-        DefinitionView rubricDef = resolve("rubric", rubricRef);
-
-        String formDataJson = submissionDataPort.findFormDataJson(kase.getSubmissionId())
-                .orElseThrow(() -> new IllegalStateException("submission " + kase.getSubmissionId() + " not found"));
-
-        // US5 (T044, FR-015): sanitized attachment summaries only — never raw bytes. Empty when no
-        // AttachmentSummaryPort bean is on the path (persona-only slice tests) or the submission has none.
-        List<String> attachmentSummaries = resolveAttachmentSummaries(kase.getSubmissionId());
-
-        // Phase 5 (T023, US3, research R4): Enhancement's resolved baseline reference set. Empty for
-        // every non-Enhancement case (no BASELINE_RESOLVED audit entry to read back) or when no
-        // BaselineContextPort bean is on the path (persona-only slice tests).
-        List<String> baselineContext = resolveBaselineContext(caseId);
-
-        // Phase 3 (T013): resolve the persona's knowledge profile from its definition body, retrieve the
-        // entitled items, and assert workspace scope (T015) before they enter the envelope.
-        List<String> knowledgeProfile = extractKnowledgeProfile(personaDef.body());
-        List<KnowledgeProvider.InjectedItem> injectedKnowledge = retrieveKnowledge(kase, knowledgeProfile);
-        workspaceScopeGuard.assertSameWorkspace(kase.getWorkspaceId(), injectedKnowledge);
-        int estimatedInjectedTokens = estimateTokens(injectedKnowledge);
-
-        return new PersonaEnvelope(
-                caseId, personaKey,
-                personaDef.id(), personaDef.version(),
-                promptDef.id(), promptDef.version(), extractTemplate(promptDef.body()),
-                rubricDef.id(), rubricDef.version(), rubricDef.body(),
-                formDataJson,
-                injectedKnowledge, estimatedInjectedTokens,
-                attachmentSummaries, regenerationComments, baselineContext);
+  /**
+   * Retrieve governed knowledge for this operation. When no {@link KnowledgeProvider} bean is on
+   * the path (persona-only slice tests) or the profile is empty, returns an empty list — identical
+   * to pre-Phase-3 behavior. The case's owning project is resolved through the feature chain so
+   * PROJECT-scoped items in that project are injected alongside WORKSPACE-scoped ones (R4, gap-6
+   * fix); if the chain is unresolvable (e.g. a persona-only slice with no feature rows) projectId
+   * stays null and only WORKSPACE-scoped items are eligible — never an error on the injection path.
+   */
+  private List<KnowledgeProvider.InjectedItem> retrieveKnowledge(
+      CaseInstance kase, List<String> profile) {
+    KnowledgeProvider provider = knowledgeProvider.getIfAvailable();
+    if (provider == null || profile.isEmpty()) {
+      return List.of();
     }
+    UUID projectId = resolveProjectId(kase.getId());
+    KnowledgeProvider.KnowledgeQuery query =
+        new KnowledgeProvider.KnowledgeQuery(
+            kase.getWorkspaceId(), projectId, profile, profile, maxItemsPerOperation);
+    return provider.retrieve(query);
+  }
 
-    /** Sanitized attachment summaries for the submission, or empty when none/no port is wired (T044). */
-    private List<String> resolveAttachmentSummaries(UUID submissionId) {
-        AttachmentSummaryPort port = attachmentSummaryPort.getIfAvailable();
-        if (port == null || submissionId == null) {
-            return List.of();
+  /**
+   * Resolve the case's owning project via {@code case_instance → feature → project_version} (T021,
+   * R4). Best-effort: any failure (missing feature chain in a slice test, no row) yields null so
+   * the PROJECT branch of the scope lattice simply contributes nothing — retrieval still returns
+   * the WORKSPACE-scoped set. Runs under the caller's RLS context, so it only sees the case's own
+   * project.
+   */
+  private UUID resolveProjectId(UUID caseId) {
+    try {
+      return jdbcTemplate.queryForObject(PROJECT_ID_SQL, UUID.class, caseId);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /**
+   * Parse the persona definition body's {@code knowledgeProfile} string array (empty if absent).
+   */
+  private List<String> extractKnowledgeProfile(String personaBody) {
+    List<String> profile = new ArrayList<>();
+    try {
+      JsonNode node = objectMapper.readTree(personaBody).path("knowledgeProfile");
+      if (node.isArray()) {
+        for (JsonNode tag : node) {
+          profile.add(tag.asText());
         }
-        return port.findSummaryTexts(submissionId);
+      }
+    } catch (Exception e) {
+      // A malformed/absent body means no profile → no injection (fail open to empty, not to error).
+      return List.of();
     }
+    return profile;
+  }
 
-    /** Enhancement's resolved baseline reference summaries, or empty when none/no port is wired (T023). */
-    private List<String> resolveBaselineContext(UUID caseId) {
-        BaselineContextPort port = baselineContextPort.getIfAvailable();
-        if (port == null) {
-            return List.of();
-        }
-        return port.findBaselineSummaries(caseId);
+  /**
+   * Rough token estimate (~4 chars/token) for the injected content, charged against the case
+   * budget.
+   */
+  private int estimateTokens(List<KnowledgeProvider.InjectedItem> items) {
+    int chars = 0;
+    for (KnowledgeProvider.InjectedItem item : items) {
+      if (item.content() != null) chars += item.content().length();
     }
+    return chars / 4;
+  }
 
-    /**
-     * Retrieve governed knowledge for this operation. When no {@link KnowledgeProvider} bean is on the
-     * path (persona-only slice tests) or the profile is empty, returns an empty list — identical to
-     * pre-Phase-3 behavior. The case's owning project is resolved through the feature chain so
-     * PROJECT-scoped items in that project are injected alongside WORKSPACE-scoped ones (R4, gap-6 fix);
-     * if the chain is unresolvable (e.g. a persona-only slice with no feature rows) projectId stays null
-     * and only WORKSPACE-scoped items are eligible — never an error on the injection path.
-     */
-    private List<KnowledgeProvider.InjectedItem> retrieveKnowledge(CaseInstance kase, List<String> profile) {
-        KnowledgeProvider provider = knowledgeProvider.getIfAvailable();
-        if (provider == null || profile.isEmpty()) {
-            return List.of();
-        }
-        UUID projectId = resolveProjectId(kase.getId());
-        KnowledgeProvider.KnowledgeQuery query = new KnowledgeProvider.KnowledgeQuery(
-                kase.getWorkspaceId(), projectId, profile, profile, maxItemsPerOperation);
-        return provider.retrieve(query);
+  private DefinitionView resolve(String type, VersionRef ref) {
+    return definitionLookup
+        .byTypeKeyVersion(type, ref.key(), ref.version())
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "pinned "
+                        + type
+                        + " definition missing from catalog: "
+                        + ref.key()
+                        + " v"
+                        + ref.version()));
+  }
+
+  private JsonNode readEntries(String entriesJson) {
+    try {
+      return objectMapper.readTree(entriesJson);
+    } catch (Exception e) {
+      throw new IllegalStateException("Malformed snapshot entries", e);
     }
+  }
 
-    /**
-     * Resolve the case's owning project via {@code case_instance → feature → project_version} (T021,
-     * R4). Best-effort: any failure (missing feature chain in a slice test, no row) yields null so the
-     * PROJECT branch of the scope lattice simply contributes nothing — retrieval still returns the
-     * WORKSPACE-scoped set. Runs under the caller's RLS context, so it only sees the case's own project.
-     */
-    private UUID resolveProjectId(UUID caseId) {
-        try {
-            return jdbcTemplate.queryForObject(PROJECT_ID_SQL, UUID.class, caseId);
-        } catch (Exception e) {
-            return null;
-        }
+  private VersionRef find(JsonNode entries, String type, String key) {
+    for (JsonNode entry : entries) {
+      if (type.equals(entry.path("type").asText()) && key.equals(entry.path("key").asText())) {
+        return new VersionRef(key, entry.path("version").asText());
+      }
     }
+    throw new NoSuchElementException("no pinned " + type + " definition for key " + key);
+  }
 
-    /** Parse the persona definition body's {@code knowledgeProfile} string array (empty if absent). */
-    private List<String> extractKnowledgeProfile(String personaBody) {
-        List<String> profile = new ArrayList<>();
-        try {
-            JsonNode node = objectMapper.readTree(personaBody).path("knowledgeProfile");
-            if (node.isArray()) {
-                for (JsonNode tag : node) {
-                    profile.add(tag.asText());
-                }
-            }
-        } catch (Exception e) {
-            // A malformed/absent body means no profile → no injection (fail open to empty, not to error).
-            return List.of();
-        }
-        return profile;
+  private String extractTemplate(String promptBody) {
+    try {
+      return objectMapper.readTree(promptBody).path("template").asText();
+    } catch (Exception e) {
+      return promptBody;
     }
+  }
 
-    /** Rough token estimate (~4 chars/token) for the injected content, charged against the case budget. */
-    private int estimateTokens(List<KnowledgeProvider.InjectedItem> items) {
-        int chars = 0;
-        for (KnowledgeProvider.InjectedItem item : items) {
-            if (item.content() != null) chars += item.content().length();
-        }
-        return chars / 4;
-    }
-
-    private DefinitionView resolve(String type, VersionRef ref) {
-        return definitionLookup.byTypeKeyVersion(type, ref.key(), ref.version())
-                .orElseThrow(() -> new IllegalStateException(
-                        "pinned " + type + " definition missing from catalog: " + ref.key() + " v" + ref.version()));
-    }
-
-    private JsonNode readEntries(String entriesJson) {
-        try {
-            return objectMapper.readTree(entriesJson);
-        } catch (Exception e) {
-            throw new IllegalStateException("Malformed snapshot entries", e);
-        }
-    }
-
-    private VersionRef find(JsonNode entries, String type, String key) {
-        for (JsonNode entry : entries) {
-            if (type.equals(entry.path("type").asText()) && key.equals(entry.path("key").asText())) {
-                return new VersionRef(key, entry.path("version").asText());
-            }
-        }
-        throw new NoSuchElementException("no pinned " + type + " definition for key " + key);
-    }
-
-    private String extractTemplate(String promptBody) {
-        try {
-            return objectMapper.readTree(promptBody).path("template").asText();
-        } catch (Exception e) {
-            return promptBody;
-        }
-    }
-
-    private record VersionRef(String key, String version) {}
+  private record VersionRef(String key, String version) {}
 }

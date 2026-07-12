@@ -11,14 +11,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/audit/chain")
 public class AuditChainController {
 
-    private final AuditChainVerifier auditChainVerifier;
+  private final AuditChainVerifier auditChainVerifier;
 
-    public AuditChainController(AuditChainVerifier auditChainVerifier) {
-        this.auditChainVerifier = auditChainVerifier;
-    }
+  public AuditChainController(AuditChainVerifier auditChainVerifier) {
+    this.auditChainVerifier = auditChainVerifier;
+  }
 
-    @PostMapping("/verify")
-    public AuditChainVerifier.ChainResult verify() {
-        return auditChainVerifier.verifyWorkspace(WorkspaceContext.require());
-    }
+  @PostMapping("/verify")
+  public AuditChainVerifier.ChainResult verify() {
+    return auditChainVerifier.verifyWorkspace(WorkspaceContext.require());
+  }
 }

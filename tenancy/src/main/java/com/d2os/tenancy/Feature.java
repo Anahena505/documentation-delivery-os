@@ -5,7 +5,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
-
 import java.util.UUID;
 
 /**
@@ -17,34 +16,44 @@ import java.util.UUID;
 @Table(name = "feature")
 public class Feature {
 
-    @Id
-    private UUID id;
+  @Id private UUID id;
 
-    @Column(name = "workspace_id", nullable = false)
-    private UUID workspaceId;
+  @Column(name = "workspace_id", nullable = false)
+  private UUID workspaceId;
 
-    @Column(name = "project_version_id", nullable = false)
-    private UUID projectVersionId;
+  @Column(name = "project_version_id", nullable = false)
+  private UUID projectVersionId;
 
-    @Column(nullable = false)
-    private String name;
+  @Column(nullable = false)
+  private String name;
 
-    @Version
-    @Column(name = "agg_version", nullable = false)
-    private long aggVersion;
+  @Version
+  @Column(name = "agg_version", nullable = false)
+  private long aggVersion;
 
-    /**
-     * The Phase 4 Q2 mutating-case-slot counter (V17, distinct from {@link #aggVersion} above — see
-     * that migration's header comment). Read-only from JPA's perspective: only {@code
-     * MutatingCaseGuard}'s raw guarded UPDATE ever writes it.
-     */
-    @Column(name = "aggregate_version", nullable = false)
-    private long aggregateVersion;
+  /**
+   * The Phase 4 Q2 mutating-case-slot counter (V17, distinct from {@link #aggVersion} above — see
+   * that migration's header comment). Read-only from JPA's perspective: only {@code
+   * MutatingCaseGuard}'s raw guarded UPDATE ever writes it.
+   */
+  @Column(name = "aggregate_version", nullable = false)
+  private long aggregateVersion;
 
-    protected Feature() {}
+  protected Feature() {}
 
-    public UUID getId() { return id; }
-    public UUID getWorkspaceId() { return workspaceId; }
-    public long getAggVersion() { return aggVersion; }
-    public long getAggregateVersion() { return aggregateVersion; }
+  public UUID getId() {
+    return id;
+  }
+
+  public UUID getWorkspaceId() {
+    return workspaceId;
+  }
+
+  public long getAggVersion() {
+    return aggVersion;
+  }
+
+  public long getAggregateVersion() {
+    return aggregateVersion;
+  }
 }

@@ -4,4 +4,16 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // US3 (T023): @SchedulerLock on AuditChainSealer/AuditChainVerifier scheduled sweeps. The
+    // annotation lives in shedlock-spring, needed on this module's own compile classpath; the
+    // LockProvider bean is wired once in app (ShedLockConfig).
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:5.16.0'
+
+    // US2 (T019): the audit sweeps + heartbeat record per-job USE metrics against a MeterRegistry
+    // injected DIRECTLY (not via observability's JobMetrics) — casecore CANNOT depend on
+    // observability, which already depends on casecore (that edge would be a Gradle cycle). Only
+    // micrometer-observation is otherwise transitively present here, so micrometer-core (the home of
+    // io.micrometer.core.instrument.MeterRegistry) is added explicitly. BOM-managed — no version.
+    implementation 'io.micrometer:micrometer-core'
 }

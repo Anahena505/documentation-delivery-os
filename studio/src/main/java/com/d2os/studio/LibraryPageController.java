@@ -16,15 +16,15 @@ import org.springframework.web.bind.annotation.RequestMapping;
 @RequestMapping("/studio/library")
 public class LibraryPageController {
 
-    private final SubscriptionService subscriptionService;
+  private final SubscriptionService subscriptionService;
 
-    public LibraryPageController(SubscriptionService subscriptionService) {
-        this.subscriptionService = subscriptionService;
-    }
+  public LibraryPageController(SubscriptionService subscriptionService) {
+    this.subscriptionService = subscriptionService;
+  }
 
-    @GetMapping
-    public String browse(Model model) {
-        model.addAttribute("entries", subscriptionService.browseGlobal(WorkspaceContext.require()));
-        return "studio/library";
-    }
+  @GetMapping
+  public String browse(Model model) {
+    model.addAttribute("entries", subscriptionService.browseGlobal(WorkspaceContext.require()));
+    return "studio/library";
+  }
 }
