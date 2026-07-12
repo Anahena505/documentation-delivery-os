@@ -1,0 +1,3 @@
+# Default owner for everything in the repo (reviewers auto-requested on PRs).
+# Replace/extend with per-module owners as the team grows.
+*       @Anahena505

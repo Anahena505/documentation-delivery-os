@@ -11,7 +11,8 @@
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3-6DB33F?logo=springboot&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20+%20pgvector-4169E1?logo=postgresql&logoColor=white)
 ![Architecture](https://img.shields.io/badge/architecture-modular%20monolith-blueviolet)
-![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 
 [Why](#-why-d2os) · [Features](#-what-makes-it-different) · [Architecture](#%EF%B8%8F-architecture) · [Quickstart](#-quickstart) · [How it works](#-how-it-works) · [Testing](#-verification--why-you-can-trust-the-build) · [Roadmap](#-roadmap)
 
@@ -183,7 +184,16 @@ Delivered specs live in [`specs/`](specs) (catalog + initiation, full persona pa
 
 ## 🤝 Contributing
 
-Contributions are welcome. The conventions the codebase already follows — system Gradle, the single global Flyway version namespace, additive-within-module boundaries, the SPI dependency-inversion pattern — are captured in [`CLAUDE.md`](CLAUDE.md). Every change is gated by CI (build + tests + ArchUnit). Start from a feature spec in [`specs/`](specs) and keep the module boundaries clean — the build will tell you if you don't.
+Contributions are welcome! Read [`CONTRIBUTING.md`](CONTRIBUTING.md) to get started, and please follow
+the [Code of Conduct](CODE_OF_CONDUCT.md). The conventions the codebase already follows — system
+Gradle, the single global Flyway version namespace, additive-within-module boundaries, the SPI
+dependency-inversion pattern — are captured in [`CLAUDE.md`](CLAUDE.md). Every change is gated by CI
+(build + tests + ArchUnit). Start from a feature spec in [`specs/`](specs) and keep the module
+boundaries clean — the build will tell you if you don't.
+
+- 🐛 Found a bug? [Open an issue](../../issues/new/choose).
+- 🔒 Found a vulnerability? Report it privately — see [`SECURITY.md`](SECURITY.md).
+- 📓 Changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## 📚 Learn more
 
@@ -194,7 +204,7 @@ Contributions are welcome. The conventions the codebase already follows — syst
 
 ## 📄 License
 
-No license file is committed yet — until one is added, all rights are reserved by the repository owner. If you intend this to be open source (recommended for the goal above), add a `LICENSE` (e.g. Apache-2.0 or MIT) and this section will point to it.
+Released under the [MIT License](LICENSE) — permissive, and simple to adopt.
 
 <div align="center">
 
